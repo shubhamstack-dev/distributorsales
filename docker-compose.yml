@@ -41,7 +41,15 @@ services:
       - backend
     ports:
       - "127.0.0.1:8081:80"
+    networks:
+      - default
+      - projectsystem_default
 
 volumes:
   mysql_data:
   staging:
+
+networks:
+  projectsystem_default:
+    external: true
+    name: projectsystem_default
