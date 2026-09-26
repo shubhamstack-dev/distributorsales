@@ -19,22 +19,28 @@ services:
     container_name: ds-api
     restart: unless-stopped
     depends_on:
-      mysql: { condition: service_healthy }
+      mysql:
+        condition: service_healthy
     environment:
       DATABASE_URL: "mysql+pymysql://root:${MYSQL_PASSWORD_URLENC}@mysql:3306/distributor_sales"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173}"
-      # Signs the session tokens. Generate once with: openssl rand -hex 32
       SECRET_KEY: "${SECRET_KEY}"
-      # The one password that opens the tool.
       APP_PASSWORD: "${APP_PASSWORD}"
       STAGING_DIR: /app/data/staging
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-60}"
     volumes:
-      # uploads waiting to be converted; safe to lose, but a volume keeps a
-      # half-finished upload alive across a restart
       - staging:/app/data/staging
+    expose:
+      - "8000"
+
+  web:
+    build: ./frontend
+    container_name: ds-web
+    restart: unless-stopped
+    depends_on:
+      - backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8081:80"
 
 volumes:
   mysql_data:
