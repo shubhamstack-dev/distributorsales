@@ -1,5 +1,3 @@
-# Distributor sales
-
 The browser tool, rebuilt as a proper system: **MySQL** for storage, **Python**
 (FastAPI + SQLAlchemy) for the API, **React** for the screens.
 
