@@ -1,0 +1,120 @@
+name: Distributor Sales CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: distributor-sales-production
+  cancel-in-progress: false
+
+jobs:
+
+  # =========================
+  # CI
+  # =========================
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- Python ----------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          pytest -q
+
+      # ---------- React ----------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run build
+
+      # ---------- Docker ----------
+      - name: Validate Docker Compose
+        run: |
+          docker compose config
+
+
+  # =========================
+  # CD
+  # =========================
+  deploy:
+    name: Deploy Production
+    needs: test
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script_stop: true
+
+          script: |
+            set -e
+
+            echo "================================="
+            echo "Distributor Sales Deployment"
+            echo "================================="
+
+            cd /opt/distributorsales
+
+            echo "Pulling latest main..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "Building containers..."
+            docker compose build
+
+            echo "Starting application..."
+            docker compose up -d
+
+            echo "Waiting for services..."
+            sleep 10
+
+            echo "Container status:"
+            docker compose ps
+
+            echo "Checking web application..."
+            curl -f http://127.0.0.1:8081
+
+            echo "Deployment successful."
+
+            echo "Cleaning unused images..."
+            docker image prune -f
