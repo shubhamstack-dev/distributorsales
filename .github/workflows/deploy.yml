@@ -12,37 +12,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+
+  # ============================================================
+  # CI - TEST & BUILD
+  # ============================================================
   test:
     name: Test & Build
     runs-on: ubuntu-latest
 
     steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------
-      # Backend
-      # -----------------------------
+      # --------------------------------------------------------
+      # Python
+      # --------------------------------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # --------------------------------------------------------
+      # Backend dependencies
+      # --------------------------------------------------------
       - name: Install backend dependencies
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest httpx
+          python -m pip install -r requirements.txt
+          python -m pip install pytest httpx
 
+      # --------------------------------------------------------
+      # Verify test dependencies
+      # --------------------------------------------------------
+      - name: Verify test dependencies
+        working-directory: backend
+        run: |
+          python -c "import httpx; print('httpx:', httpx.__version__)"
+          python -c "import pytest; print('pytest:', pytest.__version__)"
+
+      # --------------------------------------------------------
+      # Backend tests
+      # --------------------------------------------------------
       - name: Run backend tests
         working-directory: backend
         run: |
           python -m pytest -q
 
-      # -----------------------------
-      # Frontend
-      # -----------------------------
+      # --------------------------------------------------------
+      # Node.js
+      # --------------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -50,19 +73,25 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # --------------------------------------------------------
+      # Frontend dependencies
+      # --------------------------------------------------------
       - name: Install frontend dependencies
         working-directory: frontend
         run: |
           npm ci
 
+      # --------------------------------------------------------
+      # Frontend build
+      # --------------------------------------------------------
       - name: Build frontend
         working-directory: frontend
         run: |
           npm run build
 
-      # -----------------------------
+      # --------------------------------------------------------
       # Docker Compose validation
-      # -----------------------------
+      # --------------------------------------------------------
       - name: Validate Docker Compose
         env:
           MYSQL_PASSWORD: ci-password
@@ -74,9 +103,9 @@ jobs:
         run: |
           docker compose config
 
-  # ==========================================
-  # PRODUCTION DEPLOYMENT
-  # ==========================================
+  # ============================================================
+  # CD - PRODUCTION DEPLOYMENT
+  # ============================================================
   deploy:
     name: Deploy Production
     needs: test
@@ -86,6 +115,10 @@ jobs:
       name: production
 
     steps:
+
+      # --------------------------------------------------------
+      # Deploy through SSH
+      # --------------------------------------------------------
       - name: Deploy to production server
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -101,31 +134,152 @@ jobs:
             echo "Distributor Sales Production Deployment"
             echo "========================================"
 
+            # --------------------------------------------------
+            # Go to application directory
+            # --------------------------------------------------
             cd /opt/distributorsales
 
             echo ""
+            echo "Current directory:"
+            pwd
+
+            # --------------------------------------------------
+            # Pull latest code
+            # --------------------------------------------------
+            echo ""
             echo "Fetching latest main branch..."
+
             git fetch origin main
 
             echo ""
             echo "Resetting server to latest main..."
+
             git reset --hard origin/main
 
+            # --------------------------------------------------
+            # Show deployed commit
+            # --------------------------------------------------
             echo ""
-            echo "Current commit:"
+            echo "Deployed commit:"
+
             git rev-parse --short HEAD
 
+            # --------------------------------------------------
+            # Verify production .env
+            # --------------------------------------------------
             echo ""
             echo "Checking production environment..."
+
             if [ ! -f .env ]; then
-              echo "ERROR: /opt/distributorsales/.env does not exist."
-              echo "Create the production .env file on the server first."
+              echo "ERROR: Production .env file not found."
+              echo "Expected: /opt/distributorsales/.env"
               exit 1
             fi
 
+            echo "Production .env found."
+
+            # --------------------------------------------------
+            # Docker Compose configuration validation
+            # --------------------------------------------------
+            echo ""
+            echo "Validating Docker Compose configuration..."
+
+            docker compose config >/dev/null
+
+            echo "Docker Compose configuration OK."
+
+            # --------------------------------------------------
+            # Build containers
+            # --------------------------------------------------
             echo ""
             echo "Building Docker containers..."
+
             docker compose build
 
+            # --------------------------------------------------
+            # Start application
+            # --------------------------------------------------
             echo ""
-            echo "Starting
+            echo "Starting Distributor Sales..."
+
+            docker compose up -d
+
+            # --------------------------------------------------
+            # Wait for containers
+            # --------------------------------------------------
+            echo ""
+            echo "Waiting for services..."
+
+            sleep 15
+
+            # --------------------------------------------------
+            # Show container status
+            # --------------------------------------------------
+            echo ""
+            echo "Container status:"
+
+            docker compose ps
+
+            # --------------------------------------------------
+            # Verify containers are running
+            # --------------------------------------------------
+            echo ""
+            echo "Checking container states..."
+
+            if ! docker compose ps --status running | grep -q "ds-web"; then
+              echo "ERROR: ds-web is not running."
+              docker compose logs --tail=100 web || true
+              exit 1
+            fi
+
+            if ! docker compose ps --status running | grep -q "ds-api"; then
+              echo "ERROR: ds-api is not running."
+              docker compose logs --tail=100 backend || true
+              exit 1
+            fi
+
+            if ! docker compose ps --status running | grep -q "ds-mysql"; then
+              echo "ERROR: ds-mysql is not running."
+              docker compose logs --tail=100 mysql || true
+              exit 1
+            fi
+
+            echo "All Distributor Sales containers are running."
+
+            # --------------------------------------------------
+            # Web health check
+            # --------------------------------------------------
+            echo ""
+            echo "Checking web application..."
+
+            curl --fail --silent --show-error \
+              http://127.0.0.1:8081 \
+              >/dev/null
+
+            echo "Web application is responding."
+
+            # --------------------------------------------------
+            # Backend container check
+            # --------------------------------------------------
+            echo ""
+            echo "Checking backend container..."
+
+            docker compose exec -T backend \
+              python -c "print('Backend container OK')"
+
+            # --------------------------------------------------
+            # Docker cleanup
+            # --------------------------------------------------
+            echo ""
+            echo "Cleaning unused Docker images..."
+
+            docker image prune -f
+
+            # --------------------------------------------------
+            # Final status
+            # --------------------------------------------------
+            echo ""
+            echo "========================================"
+            echo "Distributor Sales deployment successful"
+            echo "========================================"
+```
