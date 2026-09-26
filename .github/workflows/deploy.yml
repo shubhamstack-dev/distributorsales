@@ -1,67 +1,48 @@
+```yaml
 name: Distributor Sales CI/CD
 
 on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
 concurrency:
   group: distributor-sales-production
   cancel-in-progress: false
 
-
 jobs:
-
-  # ============================================================
-  # CI - TEST AND BUILD
-  # ============================================================
   test:
     name: Test & Build
     runs-on: ubuntu-latest
 
     steps:
-
-      # --------------------------------------------------------
-      # Checkout
-      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      # --------------------------------------------------------
-      # Python
-      # --------------------------------------------------------
+      # -----------------------------
+      # Backend
+      # -----------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-
-      # --------------------------------------------------------
-      # Backend dependencies
-      # --------------------------------------------------------
       - name: Install backend dependencies
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest httpx
 
-
-      # --------------------------------------------------------
-      # Backend tests
-      # --------------------------------------------------------
       - name: Run backend tests
         working-directory: backend
         run: |
           python -m pytest -q
 
-
-      # --------------------------------------------------------
-      # Node.js
-      # --------------------------------------------------------
+      # -----------------------------
+      # Frontend
+      # -----------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -69,62 +50,51 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-
-      # --------------------------------------------------------
-      # Frontend dependencies
-      # --------------------------------------------------------
       - name: Install frontend dependencies
         working-directory: frontend
         run: |
           npm ci
 
-
-      # --------------------------------------------------------
-      # Frontend production build
-      # --------------------------------------------------------
       - name: Build frontend
         working-directory: frontend
         run: |
           npm run build
 
-
-      # --------------------------------------------------------
-      # Validate Docker Compose
-      # --------------------------------------------------------
+      # -----------------------------
+      # Docker Compose validation
+      # -----------------------------
       - name: Validate Docker Compose
+        env:
+          MYSQL_PASSWORD: ci-password
+          MYSQL_PASSWORD_URLENC: ci-password
+          SECRET_KEY: ci-secret-key
+          APP_PASSWORD: ci-app-password
+          CORS_ORIGINS: http://localhost
+          MAX_UPLOAD_MB: 60
         run: |
           docker compose config
 
-
-  # ============================================================
-  # CD - PRODUCTION DEPLOYMENT
-  # ============================================================
+  # ==========================================
+  # PRODUCTION DEPLOYMENT
+  # ==========================================
   deploy:
     name: Deploy Production
     needs: test
-
     runs-on: ubuntu-latest
 
     environment:
       name: production
 
     steps:
-
-      # --------------------------------------------------------
-      # Deploy through SSH
-      # --------------------------------------------------------
       - name: Deploy to production server
         uses: appleboy/ssh-action@v1.2.2
-
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-
           script_stop: true
 
           script: |
-
             set -e
 
             echo "========================================"
@@ -133,81 +103,29 @@ jobs:
 
             cd /opt/distributorsales
 
-
-            # --------------------------------------------------
-            # Pull latest code
-            # --------------------------------------------------
-
+            echo ""
             echo "Fetching latest main branch..."
-
             git fetch origin main
 
+            echo ""
+            echo "Resetting server to latest main..."
             git reset --hard origin/main
 
-
-            # --------------------------------------------------
-            # Verify branch
-            # --------------------------------------------------
-
+            echo ""
             echo "Current commit:"
-
             git rev-parse --short HEAD
 
+            echo ""
+            echo "Checking production environment..."
+            if [ ! -f .env ]; then
+              echo "ERROR: /opt/distributorsales/.env does not exist."
+              echo "Create the production .env file on the server first."
+              exit 1
+            fi
 
-            # --------------------------------------------------
-            # Build containers
-            # --------------------------------------------------
-
+            echo ""
             echo "Building Docker containers..."
-
             docker compose build
 
-
-            # --------------------------------------------------
-            # Start containers
-            # --------------------------------------------------
-
-            echo "Starting Distributor Sales..."
-
-            docker compose up -d
-
-
-            # --------------------------------------------------
-            # Wait for startup
-            # --------------------------------------------------
-
-            echo "Waiting for services..."
-
-            sleep 15
-
-
-            # --------------------------------------------------
-            # Show container status
-            # --------------------------------------------------
-
-            echo "Container status:"
-
-            docker compose ps
-
-
-            # --------------------------------------------------
-            # Check web application
-            # --------------------------------------------------
-
-            echo "Checking web application..."
-
-            curl -f http://127.0.0.1:8081
-
-
-            # --------------------------------------------------
-            # Cleanup unused images
-            # --------------------------------------------------
-
-            echo "Cleaning unused Docker images..."
-
-            docker image prune -f
-
-
-            echo "========================================"
-            echo "Deployment completed successfully"
-            echo "========================================"
+            echo ""
+            echo "Starting
