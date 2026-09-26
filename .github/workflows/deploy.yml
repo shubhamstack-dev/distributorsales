@@ -23,9 +23,10 @@ jobs:
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.SERVER_HOST }}
+          port: 3052
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script_stop: true
+          command_timeout: 30m
 
           script: |
             set -e
@@ -35,8 +36,14 @@ jobs:
             echo "========================================"
 
             echo ""
-            echo "=== Going to application directory ==="
+            echo "=== Server information ==="
+            hostname
+            whoami
+
+            echo ""
+            echo "=== Application directory ==="
             cd /opt/distributorsales
+            pwd
 
             echo ""
             echo "=== Updating source code ==="
