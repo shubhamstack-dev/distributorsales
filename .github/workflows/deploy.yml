@@ -1,4 +1,3 @@
-```yaml
 name: Distributor Sales CI/CD
 
 on:
@@ -282,4 +281,3 @@ jobs:
             echo "========================================"
             echo "Distributor Sales deployment successful"
             echo "========================================"
-```
