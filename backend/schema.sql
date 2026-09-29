@@ -8,7 +8,13 @@ CREATE TABLE IF NOT EXISTS distributor (
   NegateReturns TINYINT NOT NULL DEFAULT 1,
   PickPattern VARCHAR(200) NULL,                    -- names the files this rule wants
   Note VARCHAR(500) NULL,
-  Active TINYINT NOT NULL DEFAULT 1
+  Active TINYINT NOT NULL DEFAULT 1,
+  -- master details; the CountryId foreign key is added in schema_masters.sql
+  Code VARCHAR(20) NULL,
+  CountryId INT NULL,
+  ContactPerson VARCHAR(120) NULL,
+  Phone VARCHAR(30) NULL,
+  Email VARCHAR(120) NULL
 );
 
 CREATE TABLE IF NOT EXISTS batch (
@@ -40,7 +46,7 @@ CREATE TABLE IF NOT EXISTS batch_file (
   FileName VARCHAR(255) NOT NULL,
   Used TINYINT NOT NULL DEFAULT 0,
   Layout VARCHAR(30) NULL,
-  Rows INT NOT NULL DEFAULT 0,
+  `Rows` INT NOT NULL DEFAULT 0,                    -- reserved word in MySQL 8, so quoted
   Omitted INT NOT NULL DEFAULT 0,
   Detail VARCHAR(500) NULL,
   CONSTRAINT fk_bf_batch FOREIGN KEY (BatchId) REFERENCES batch(Id) ON DELETE CASCADE

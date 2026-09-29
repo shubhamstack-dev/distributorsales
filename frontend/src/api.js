@@ -64,6 +64,13 @@ function upload(url, form, onProgress) {
   })
 }
 
+/** Query string from an object, leaving out empty values. */
+export function qs(params = {}) {
+  return Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+}
+
 export const api = {
   login: (password, who) => call('POST', '/api/login', { password, who }),
   distributors: () => call('GET', '/api/distributors'),
@@ -80,6 +87,19 @@ export const api = {
   rows: (id, page, size, q) =>
     call('GET', `/api/batches/${id}/rows?page=${page}&size=${size}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
   deleteBatch: (id) => call('DELETE', `/api/batches/${id}`),
+
+  // ---- master data: one set of calls for every master, by slug
+  masterMeta: () => call('GET', '/api/masters/meta'),
+  masterList: (slug, params) => call('GET', `/api/masters/${slug}?${qs(params)}`),
+  masterOptions: (slug, params) => call('GET', `/api/masters/${slug}/options?${qs(params)}`),
+  masterCreate: (slug, body) => call('POST', `/api/masters/${slug}`, body),
+  masterUpdate: (slug, id, body) => call('PUT', `/api/masters/${slug}/${id}`, body),
+  masterDelete: (slug, id) => call('DELETE', `/api/masters/${slug}/${id}`),
+  masterDeleteMany: (slug, ids) => call('POST', `/api/masters/${slug}/delete-many`, { ids }),
+  masterBulk: (slug, body) => call('POST', `/api/masters/${slug}/bulk`, body),
+  masterCopyYear: (slug, body) => call('POST', `/api/masters/${slug}/copy-year`, body),
+  rate: (frm, to, on) => call('GET', `/api/currency/rate?${qs({ frm, to, on })}`),
+  convert: (amount, frm, to, on) => call('GET', `/api/currency/convert?${qs({ amount, frm, to, on })}`),
   // the export needs the token in a header, so it is fetched and then saved
   download: async (id) => {
     const res = await fetch(`/api/batches/${id}/export`, { headers: auth() })

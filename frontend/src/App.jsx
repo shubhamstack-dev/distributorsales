@@ -6,6 +6,7 @@ import Upload from './pages/Upload.jsx'
 import Batches from './pages/Batches.jsx'
 import BatchDetail from './pages/BatchDetail.jsx'
 import Distributors from './pages/Distributors.jsx'
+import Masters from './pages/masters/Masters.jsx'
 
 export default function App() {
   const [who, setWho] = useState(sessionStorage.getItem('ds.who') || '')
@@ -36,6 +37,7 @@ export default function App() {
           <NavLink to="/" end>Convert</NavLink>
           <NavLink to="/batches">Batches</NavLink>
           <NavLink to="/distributors">Rules</NavLink>
+          <NavLink to="/masters">Masters</NavLink>
         </nav>
         <div className="who">{who}<button className="btn sm" onClick={signOut}>Sign out</button></div>
       </header>
@@ -45,6 +47,7 @@ export default function App() {
           <Route path="/batches" element={<Batches />} />
           <Route path="/batches/:id" element={<BatchDetail />} />
           <Route path="/distributors" element={<Distributors />} />
+          <Route path="/masters/*" element={<Masters />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>

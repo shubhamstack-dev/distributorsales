@@ -1,3 +1,5 @@
+# Distributor sales
+
 The browser tool, rebuilt as a proper system: **MySQL** for storage, **Python**
 (FastAPI + SQLAlchemy) for the API, **React** for the screens.
 
@@ -64,7 +66,7 @@ than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 27 tests
+    cd backend && pytest -q        # 57 tests (27 conversion + 30 master data)
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real
@@ -72,11 +74,59 @@ workbooks, and the whole journey — inspect, commit, read back, export — with
 totals checked at each step. The suite asserts the numbers this replaced:
 **82 rows, 140 omitted, 43,200 quantity, 27,65,117.77**.
 
+## Master data
+
+The **Masters** screen holds the structure sales are reported against, grouped
+down the left-hand side:
+
+| Group | Masters |
+|---|---|
+| Setup | Years, Distributors, Companies, Countries, Currency rates, Company › Countries |
+| Geography | Zones › Headquarters › Territories |
+| Products | Product groups › Brands › SKUs, Product reporting (P1 / P2 / X), Product reporting › SKUs |
+| Customers | Customers (Customer ID, name, classification) |
+| People | Designations, Roles, Teams, Team › Product groups, Team › Headquarters, Employees |
+| Alignment | Customer alignment, Employee alignment (both at SKU level) |
+
+**Structure is permanent; alignment is per year.** A territory sits under one
+HQ and an SKU under one brand, and that does not change year to year. Which team
+carries which product group, and which customer and employee cover which SKU in
+which territory, is realigned every year — so every alignment row carries a
+Year, and last year's alignment stays readable. *Copy from a year* starts a new
+year from the old one; change only what moved.
+
+**The rules between masters are enforced, with the fix in the message.** A
+customer's SKU can only be assigned to a team that carries its product group
+and covers its territory's HQ that year. A SKU reports under one line per year.
+A reporting line cannot go round in a circle. A row still in use cannot be
+deleted — the message says what uses it, and suggests marking it inactive.
+
+**SKU level without typing every SKU.** *Assign a whole group* adds one row per
+active SKU of a product group (or one brand of it), skipping any already there.
+
+**INR and NPR.** India and Nepal are seeded, with the rate at the 1.60 peg from
+2000-01-01 — confirm it. A rate is kept one way (INR → NPR) and the other way is
+its inverse, so the two can never disagree; a new rate applies from its date.
+`GET /api/currency/convert?amount=&frm=NPR&to=INR&on=` converts on any day.
+
+**One definition drives everything.** `app/masters/specs.py` describes each
+master — fields, uniqueness, validation, what points at it. The API and the
+screens are both drawn from it, so a field added there appears on the screen
+with no front-end change.
+
+**Upgrading an existing database** needs nothing by hand: on startup the API
+creates the new `md_*` tables and adds the new distributor columns (Code,
+Country, contact details). To apply by hand instead: `migrations/001_…sql`
+(old databases only), then `schema.sql`, then `schema_masters.sql`.
+
 ## What it does not do
 
 * **PDFs.** Gunjeshwari and Pharmachem originally arrived as PDFs. Extracting
   tables from them is unreliable enough that refusing beats handing over
   plausible-looking wrong numbers. Export to Excel first.
+* **Linking converted sales rows to the masters.** Batches still store the names
+  exactly as the distributor sent them. Mapping those names to Customer IDs and
+  SKUs is the natural next step, and the masters are shaped for it.
 * **Customer-name mapping.** Gunjeshwari's names were matched against a
   reference list by hand, with two matches flagged as doubtful at the time.
   Names are cleaned here, not mapped.

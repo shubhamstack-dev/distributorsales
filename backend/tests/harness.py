@@ -34,6 +34,7 @@ app.dependency_overrides[database.get_db] = override_db
 from app.services import seed as _seed                # noqa: E402
 _s = Testing()
 _seed.ensure(_s)
+_seed.ensure_masters(_s)
 _s.close()
 client = TestClient(app)
 anon = TestClient(app)

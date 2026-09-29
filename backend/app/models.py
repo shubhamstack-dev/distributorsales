@@ -27,6 +27,13 @@ class Distributor(Base):
     pick_pattern: Mapped[str | None] = mapped_column("PickPattern", String(200))
     note: Mapped[str | None] = mapped_column("Note", String(500))
     active: Mapped[int] = mapped_column("Active", Integer, nullable=False, default=1)
+    # Master details. Added after the first release, so services/migrate.py adds
+    # them to a database that already has the table; all are nullable for that.
+    code: Mapped[str | None] = mapped_column("Code", String(20))
+    country_id: Mapped[int | None] = mapped_column("CountryId", ForeignKey("md_country.Id"))
+    contact_person: Mapped[str | None] = mapped_column("ContactPerson", String(120))
+    phone: Mapped[str | None] = mapped_column("Phone", String(30))
+    email: Mapped[str | None] = mapped_column("Email", String(120))
 
 
 class Batch(Base):

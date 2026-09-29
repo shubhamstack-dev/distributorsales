@@ -7,10 +7,10 @@ import re
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from . import config, models as M
+from . import config, models as M, models_master  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
-from .routers import api
-from .services import seed
+from .routers import api, masters
+from .services import migrate, seed
 from .services.auth import read_token
 
 app = FastAPI(title="Distributor sales", version="1.0")
@@ -42,14 +42,21 @@ def health():
 
 
 app.include_router(api.router)
+app.include_router(masters.router)
 
 Base.metadata.create_all(engine)
+try:
+    for added in migrate.ensure_columns(engine):
+        print(f"[startup] added {added}", flush=True)
+except Exception as e:
+    print(f"[startup] could not bring the tables up to date: {e}", flush=True)
 os.makedirs(config.STAGING_DIR, exist_ok=True)
 
 try:
     _db = SessionLocal()
     try:
         seed.ensure(_db)
+        seed.ensure_masters(_db)
     finally:
         _db.close()
 except Exception as e:                       # never stop the API booting over seeding
