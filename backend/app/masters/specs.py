@@ -191,6 +191,10 @@ CODE = Field("code", "Code", "code", required=True)
 NAME = Field("name", "Name", required=True)
 ACTIVE = Field("active", "Active", "bool", default=1)
 YEAR = Field("year_id", "Year", "ref", required=True, ref="year")
+LEGACY = Field("legacy_id", "Old system ID", "int", in_list=False,
+               help="Id in the old SQL Server system; set by the import")
+START = Field("start_date", "Start date", "date", in_list=False)
+END = Field("end_date", "End date", "date", in_list=False)
 
 
 def _c(*fs):  # fresh copies, so specs never share a mutable Field
@@ -261,30 +265,32 @@ SPECS: list[Spec] = [
     # -------------------------------------------------------- geography
     Spec("zone", "Zones", "Geography", X.Zone, [
         *_c(CODE, NAME), Field("country_id", "Country", "ref", required=True, ref="country"),
-        *_c(ACTIVE)], unique=[(("code",), "Another zone already has that code.")]),
+        *_c(ACTIVE, LEGACY)], unique=[(("code",), "Another zone already has that code.")]),
 
     Spec("headquarter", "Headquarters", "Geography", X.Headquarter, [
-        *_c(CODE, NAME), Field("zone_id", "Zone", "ref", required=True, ref="zone"), *_c(ACTIVE)],
+        *_c(CODE, NAME), Field("zone_id", "Zone", "ref", required=True, ref="zone"), *_c(ACTIVE, LEGACY)],
         unique=[(("code",), "Another HQ already has that code.")],
         description="Each HQ sits in one zone."),
 
     Spec("territory", "Territories", "Geography", X.Territory, [
         *_c(CODE, NAME),
         Field("headquarter_id", "Headquarter", "ref", required=True, ref="headquarter"),
-        *_c(ACTIVE)],
+        *_c(ACTIVE, LEGACY)],
         unique=[(("code",), "Another territory already has that code.")],
         option_filters={"zone_id": _territory_by_zone},
         description="Each territory sits under one HQ."),
 
     # --------------------------------------------------------- products
     Spec("product_group", "Product groups", "Products", X.ProductGroup, [
-        *_c(CODE, NAME), Field("company_id", "Company", "ref", ref="company"), *_c(ACTIVE)],
+        *_c(CODE, NAME), Field("company_id", "Company", "ref", ref="company"),
+        *_c(ACTIVE, LEGACY)],
         unique=[(("code",), "Another product group already has that code.")]),
 
     Spec("brand", "Brands", "Products", X.Brand, [
         *_c(CODE, NAME),
         Field("product_group_id", "Product group", "ref", required=True, ref="product_group"),
-        *_c(ACTIVE)], unique=[(("code",), "Another brand already has that code.")],
+        Field("nrv", "NRV", in_list=False),
+        *_c(START, END, ACTIVE, LEGACY)], unique=[(("code",), "Another brand already has that code.")],
         description="Each brand belongs to one product group."),
 
     Spec("sku", "SKUs", "Products", X.Sku, [
@@ -292,9 +298,20 @@ SPECS: list[Spec] = [
         Field("name", "Name", required=True),
         Field("brand_id", "Brand", "ref", required=True, ref="brand"),
         Field("pack_size", "Pack size", help="e.g. 10x10 TAB"),
-        *_c(ACTIVE)], unique=[(("code",), "Another SKU already has that code.")],
+        Field("sap_product_id", "SAP product ID"),
+        Field("material_code", "Material code", in_list=False),
+        Field("nrv", "NRV", in_list=False),
+        *_c(START, END, ACTIVE, LEGACY)],
+        search=["code", "name", "sap_product_id", "material_code"], unique=[(("code",), "Another SKU already has that code.")],
         option_filters={"product_group_id": _sku_by_group},
         description="Each SKU belongs to one brand, and through it to one product group."),
+
+    Spec("sku_alias", "SKU aliases", "Products", X.SkuAlias, [
+        Field("sku_id", "SKU", "ref", required=True, ref="sku"),
+        Field("alias", "Alias", required=True, help="The name as a distributor writes it"),
+    ], label=lambda o: o.alias, search=["alias"], order=["alias"],
+        unique=[(("sku_id", "alias"), "That SKU already has that alias.")],
+        description="Other names a SKU appears under in distributors' files."),
 
     Spec("product_reporting", "Product reporting", "Products", X.ProductReporting, [
         *_c(YEAR, CODE, NAME),
@@ -322,25 +339,43 @@ SPECS: list[Spec] = [
         Field("code", "Customer ID", "code", required=True),
         Field("name", "Customer name", required=True),
         Field("classification", "Classification", required=True, suggest=CLASSIFICATIONS),
-        Field("city", "City"),
-        Field("country_id", "Country", "ref", ref="country"),
-        *_c(ACTIVE)], search=["code", "name", "classification", "city"],
+        Field("sap_id", "SAP ID"),
+        Field("billing_name", "Billing name", in_list=False),
+        Field("zone_id", "Zone", "ref", ref="zone", in_list=False),
+        Field("headquarter_id", "HQ", "ref", ref="headquarter"),
+        Field("territory_id", "Territory", "ref", ref="territory"),
+        Field("sub_territory", "Sub-territory", in_list=False),
+        Field("state", "State", in_list=False),
+        Field("remark", "Remark", in_list=False),
+        Field("city", "City", in_list=False),
+        Field("country_id", "Country", "ref", ref="country", in_list=False),
+        *_c(START, END, ACTIVE, LEGACY)],
+        search=["code", "name", "classification", "city", "sap_id", "billing_name"],
         unique=[(("code",), "Another customer already has that Customer ID.")]),
+
+    Spec("customer_alias", "Customer aliases", "Customers", X.CustomerAlias, [
+        Field("customer_id", "Customer", "ref", required=True, ref="customer"),
+        Field("alias", "Alias", required=True, help="The name as a distributor writes it"),
+    ], label=lambda o: o.alias, search=["alias"], order=["alias"],
+        unique=[(("customer_id", "alias"), "That customer already has that alias.")],
+        description="Other names a customer appears under in distributors' files."),
 
     # ----------------------------------------------------------- people
     Spec("designation", "Designations", "People", X.Designation, [
         *_c(CODE, NAME),
         Field("level", "Level", "int", required=True, default=1,
               help="1 = field; higher numbers sit higher up"),
-        *_c(ACTIVE)], order=["level", "code"],
+        *_c(ACTIVE, LEGACY)], order=["level", "code"],
         unique=[(("code",), "Another designation already has that code.")]),
 
     Spec("role", "Roles", "People", X.Role, [
-        *_c(CODE, NAME), Field("description", "Description", in_list=False), *_c(ACTIVE)],
+        *_c(CODE, NAME), Field("description", "Description", in_list=False),
+        *_c(ACTIVE, LEGACY)],
         unique=[(("code",), "Another role already has that code.")]),
 
     Spec("team", "Teams", "People", X.Team, [
-        *_c(CODE, NAME), Field("company_id", "Company", "ref", ref="company"), *_c(ACTIVE)],
+        *_c(CODE, NAME), Field("company_id", "Company", "ref", ref="company"),
+        *_c(ACTIVE, LEGACY)],
         unique=[(("code",), "Another team already has that code.")]),
 
     Spec("team_product_group", "Team › Product groups", "People", X.TeamProductGroup, [
@@ -373,7 +408,10 @@ SPECS: list[Spec] = [
         Field("email", "Email", in_list=False),
         Field("phone", "Phone", in_list=False),
         Field("joining_date", "Joined", "date", in_list=False),
-        *_c(ACTIVE)], search=["code", "name", "email"],
+        Field("end_date", "Left on", "date", in_list=False),
+        Field("territory_code", "Territory code", in_list=False),
+        Field("rd_cs_editable", "RD/CS editable", "bool", default=0, in_list=False),
+        *_c(ACTIVE, LEGACY)], search=["code", "name", "email"],
         unique=[(("code",), "Another employee already has that code.")],
         validate=v_employee),
 

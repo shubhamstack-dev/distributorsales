@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS md_designation (
   `Id` INTEGER NOT NULL AUTO_INCREMENT,
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(80) NOT NULL,
-  `Level` INTEGER NOT NULL,
+  `Level` INTEGER NOT NULL DEFAULT 1,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_designation_code UNIQUE (`Code`)
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS md_role (
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(80) NOT NULL,
   `Description` VARCHAR(300),
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_role_code UNIQUE (`Code`)
@@ -80,24 +82,12 @@ CREATE TABLE IF NOT EXISTS md_company_country (
   FOREIGN KEY(`CountryId`) REFERENCES md_country (`Id`)
 );
 
-CREATE TABLE IF NOT EXISTS md_customer (
-  `Id` INTEGER NOT NULL AUTO_INCREMENT,
-  `CustomerCode` VARCHAR(30) NOT NULL,
-  `Name` VARCHAR(200) NOT NULL,
-  `Classification` VARCHAR(40) NOT NULL,
-  `City` VARCHAR(80),
-  `CountryId` INTEGER,
-  `Active` INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (`Id`),
-  CONSTRAINT uq_customer_code UNIQUE (`CustomerCode`),
-  FOREIGN KEY(`CountryId`) REFERENCES md_country (`Id`)
-);
-
 CREATE TABLE IF NOT EXISTS md_product_group (
   `Id` INTEGER NOT NULL AUTO_INCREMENT,
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(120) NOT NULL,
   `CompanyId` INTEGER,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_pg_code UNIQUE (`Code`),
@@ -121,6 +111,7 @@ CREATE TABLE IF NOT EXISTS md_team (
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(80) NOT NULL,
   `CompanyId` INTEGER,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_team_code UNIQUE (`Code`),
@@ -132,6 +123,7 @@ CREATE TABLE IF NOT EXISTS md_zone (
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(120) NOT NULL,
   `CountryId` INTEGER NOT NULL,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_zone_code UNIQUE (`Code`),
@@ -143,6 +135,10 @@ CREATE TABLE IF NOT EXISTS md_brand (
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(120) NOT NULL,
   `ProductGroupId` INTEGER NOT NULL,
+  `Nrv` VARCHAR(20),
+  `StartDate` DATE,
+  `EndDate` DATE,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_brand_code UNIQUE (`Code`),
@@ -154,6 +150,7 @@ CREATE TABLE IF NOT EXISTS md_headquarter (
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(120) NOT NULL,
   `ZoneId` INTEGER NOT NULL,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_hq_code UNIQUE (`Code`),
@@ -184,6 +181,10 @@ CREATE TABLE IF NOT EXISTS md_employee (
   `Email` VARCHAR(120),
   `Phone` VARCHAR(30),
   `JoiningDate` DATE,
+  `EndDate` DATE,
+  `TerritoryCode` VARCHAR(20),
+  `RdCsEditable` INTEGER NOT NULL DEFAULT 0,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_employee_code UNIQUE (`Code`),
@@ -197,9 +198,15 @@ CREATE TABLE IF NOT EXISTS md_employee (
 CREATE TABLE IF NOT EXISTS md_sku (
   `Id` INTEGER NOT NULL AUTO_INCREMENT,
   `Code` VARCHAR(20) NOT NULL,
-  `Name` VARCHAR(200) NOT NULL,
+  `Name` VARCHAR(250) NOT NULL,
   `BrandId` INTEGER NOT NULL,
   `PackSize` VARCHAR(40),
+  `SapProductId` VARCHAR(25),
+  `MaterialCode` VARCHAR(50),
+  `Nrv` VARCHAR(20),
+  `StartDate` DATE,
+  `EndDate` DATE,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_sku_code UNIQUE (`Code`),
@@ -223,10 +230,87 @@ CREATE TABLE IF NOT EXISTS md_territory (
   `Code` VARCHAR(20) NOT NULL,
   `Name` VARCHAR(120) NOT NULL,
   `HeadquarterId` INTEGER NOT NULL,
+  `LegacyId` INTEGER,
   `Active` INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (`Id`),
   CONSTRAINT uq_territory_code UNIQUE (`Code`),
   FOREIGN KEY(`HeadquarterId`) REFERENCES md_headquarter (`Id`)
+);
+
+CREATE TABLE IF NOT EXISTS md_customer (
+  `Id` INTEGER NOT NULL AUTO_INCREMENT,
+  `CustomerCode` VARCHAR(30) NOT NULL,
+  `Name` VARCHAR(200) NOT NULL,
+  `Classification` VARCHAR(40) NOT NULL,
+  `City` VARCHAR(80),
+  `CountryId` INTEGER,
+  `SapId` VARCHAR(50),
+  `BillingName` VARCHAR(200),
+  `ZoneId` INTEGER,
+  `HeadquarterId` INTEGER,
+  `TerritoryId` INTEGER,
+  `SubTerritory` VARCHAR(120),
+  `State` VARCHAR(80),
+  `Remark` VARCHAR(200),
+  `StartDate` DATE,
+  `EndDate` DATE,
+  `LegacyId` INTEGER,
+  `Active` INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (`Id`),
+  CONSTRAINT uq_customer_code UNIQUE (`CustomerCode`),
+  FOREIGN KEY(`CountryId`) REFERENCES md_country (`Id`),
+  FOREIGN KEY(`ZoneId`) REFERENCES md_zone (`Id`),
+  FOREIGN KEY(`HeadquarterId`) REFERENCES md_headquarter (`Id`),
+  FOREIGN KEY(`TerritoryId`) REFERENCES md_territory (`Id`)
+);
+
+CREATE TABLE IF NOT EXISTS md_employee_assignment (
+  `Id` INTEGER NOT NULL AUTO_INCREMENT,
+  `YearId` INTEGER NOT NULL,
+  `EmployeeId` INTEGER NOT NULL,
+  `TerritoryId` INTEGER NOT NULL,
+  `ProductGroupId` INTEGER NOT NULL,
+  `SkuId` INTEGER NOT NULL,
+  PRIMARY KEY (`Id`),
+  CONSTRAINT uq_ea_year_emp_terr_sku UNIQUE (`YearId`, `EmployeeId`, `TerritoryId`, `SkuId`),
+  FOREIGN KEY(`YearId`) REFERENCES md_year (`Id`),
+  FOREIGN KEY(`EmployeeId`) REFERENCES md_employee (`Id`),
+  FOREIGN KEY(`TerritoryId`) REFERENCES md_territory (`Id`),
+  FOREIGN KEY(`ProductGroupId`) REFERENCES md_product_group (`Id`),
+  FOREIGN KEY(`SkuId`) REFERENCES md_sku (`Id`),
+  INDEX ix_ea_territory (`YearId`, `TerritoryId`)
+);
+
+CREATE TABLE IF NOT EXISTS md_product_reporting_sku (
+  `Id` INTEGER NOT NULL AUTO_INCREMENT,
+  `ProductReportingId` INTEGER NOT NULL,
+  `SkuId` INTEGER NOT NULL,
+  `YearId` INTEGER NOT NULL,
+  PRIMARY KEY (`Id`),
+  CONSTRAINT uq_prs_year_sku UNIQUE (`YearId`, `SkuId`),
+  FOREIGN KEY(`ProductReportingId`) REFERENCES md_product_reporting (`Id`),
+  FOREIGN KEY(`SkuId`) REFERENCES md_sku (`Id`),
+  FOREIGN KEY(`YearId`) REFERENCES md_year (`Id`)
+);
+
+CREATE TABLE IF NOT EXISTS md_sku_alias (
+  `Id` INTEGER NOT NULL AUTO_INCREMENT,
+  `SkuId` INTEGER NOT NULL,
+  `Alias` VARCHAR(250) NOT NULL,
+  PRIMARY KEY (`Id`),
+  CONSTRAINT uq_sku_alias UNIQUE (`SkuId`, `Alias`),
+  FOREIGN KEY(`SkuId`) REFERENCES md_sku (`Id`),
+  INDEX ix_sku_alias (`Alias`)
+);
+
+CREATE TABLE IF NOT EXISTS md_customer_alias (
+  `Id` INTEGER NOT NULL AUTO_INCREMENT,
+  `CustomerId` INTEGER NOT NULL,
+  `Alias` VARCHAR(200) NOT NULL,
+  PRIMARY KEY (`Id`),
+  CONSTRAINT uq_customer_alias UNIQUE (`CustomerId`, `Alias`),
+  FOREIGN KEY(`CustomerId`) REFERENCES md_customer (`Id`),
+  INDEX ix_customer_alias (`Alias`)
 );
 
 CREATE TABLE IF NOT EXISTS md_customer_assignment (
@@ -244,44 +328,6 @@ CREATE TABLE IF NOT EXISTS md_customer_assignment (
   FOREIGN KEY(`TerritoryId`) REFERENCES md_territory (`Id`),
   FOREIGN KEY(`TeamId`) REFERENCES md_team (`Id`),
   FOREIGN KEY(`ProductGroupId`) REFERENCES md_product_group (`Id`),
-  FOREIGN KEY(`SkuId`) REFERENCES md_sku (`Id`)
-);
-
-CREATE TABLE IF NOT EXISTS md_employee_assignment (
-  `Id` INTEGER NOT NULL AUTO_INCREMENT,
-  `YearId` INTEGER NOT NULL,
-  `EmployeeId` INTEGER NOT NULL,
-  `TerritoryId` INTEGER NOT NULL,
-  `ProductGroupId` INTEGER NOT NULL,
-  `SkuId` INTEGER NOT NULL,
-  PRIMARY KEY (`Id`),
-  CONSTRAINT uq_ea_year_emp_terr_sku UNIQUE (`YearId`, `EmployeeId`, `TerritoryId`, `SkuId`),
-  FOREIGN KEY(`YearId`) REFERENCES md_year (`Id`),
-  FOREIGN KEY(`EmployeeId`) REFERENCES md_employee (`Id`),
-  FOREIGN KEY(`TerritoryId`) REFERENCES md_territory (`Id`),
-  FOREIGN KEY(`ProductGroupId`) REFERENCES md_product_group (`Id`),
-  FOREIGN KEY(`SkuId`) REFERENCES md_sku (`Id`)
-);
-
-CREATE TABLE IF NOT EXISTS md_product_reporting_sku (
-  `Id` INTEGER NOT NULL AUTO_INCREMENT,
-  `ProductReportingId` INTEGER NOT NULL,
-  `SkuId` INTEGER NOT NULL,
-  `YearId` INTEGER NOT NULL,
-  PRIMARY KEY (`Id`),
-  CONSTRAINT uq_prs_year_sku UNIQUE (`YearId`, `SkuId`),
-  FOREIGN KEY(`ProductReportingId`) REFERENCES md_product_reporting (`Id`),
   FOREIGN KEY(`SkuId`) REFERENCES md_sku (`Id`),
-  FOREIGN KEY(`YearId`) REFERENCES md_year (`Id`)
+  INDEX ix_ca_territory (`YearId`, `TerritoryId`)
 );
-
--- The distributor table gained CountryId (see schema.sql); its foreign key is
--- added here because md_country has to exist first.
-ALTER TABLE distributor
-  ADD CONSTRAINT fk_dist_country FOREIGN KEY (CountryId) REFERENCES md_country(Id);
-
--- Seed: the two countries and the pegged rate (edit on the Currency rates screen).
-INSERT IGNORE INTO md_country (Code, Name, CurrencyCode, Active) VALUES
-  ('IN', 'India', 'INR', 1), ('NP', 'Nepal', 'NPR', 1);
-INSERT IGNORE INTO md_currency_rate (FromCurrency, ToCurrency, Rate, EffectiveFrom, Note) VALUES
-  ('INR', 'NPR', 1.600000, '2000-01-01', 'Official peg; confirm before relying on it');

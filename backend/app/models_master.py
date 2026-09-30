@@ -35,6 +35,12 @@ def _active():
     return mapped_column("Active", Integer, nullable=False, default=1)
 
 
+def _legacy():
+    """The row's Id in the old SQL Server system. Set only by the legacy import,
+    which uses it to update a row on a second run instead of adding it twice."""
+    return mapped_column("LegacyId", Integer)
+
+
 # ================================================================== setup
 class Year(Base):
     __tablename__ = "md_year"
@@ -98,6 +104,7 @@ class Zone(Base):
     code: Mapped[str] = _code()
     name: Mapped[str] = _name()
     country_id: Mapped[int] = mapped_column("CountryId", ForeignKey("md_country.Id"), nullable=False)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_zone_code"),)
 
@@ -108,6 +115,7 @@ class Headquarter(Base):
     code: Mapped[str] = _code()
     name: Mapped[str] = _name()
     zone_id: Mapped[int] = mapped_column("ZoneId", ForeignKey("md_zone.Id"), nullable=False)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_hq_code"),)
 
@@ -119,6 +127,7 @@ class Territory(Base):
     name: Mapped[str] = _name()
     headquarter_id: Mapped[int] = mapped_column(
         "HeadquarterId", ForeignKey("md_headquarter.Id"), nullable=False)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_territory_code"),)
 
@@ -130,6 +139,7 @@ class ProductGroup(Base):
     code: Mapped[str] = _code()
     name: Mapped[str] = _name()
     company_id: Mapped[int | None] = mapped_column("CompanyId", ForeignKey("md_company.Id"))
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_pg_code"),)
 
@@ -141,6 +151,10 @@ class Brand(Base):
     name: Mapped[str] = _name()
     product_group_id: Mapped[int] = mapped_column(
         "ProductGroupId", ForeignKey("md_product_group.Id"), nullable=False)
+    nrv: Mapped[str | None] = mapped_column("Nrv", String(20))
+    start_date: Mapped[date | None] = mapped_column("StartDate", Date)
+    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_brand_code"),)
 
@@ -149,9 +163,15 @@ class Sku(Base):
     __tablename__ = "md_sku"
     id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = _code()
-    name: Mapped[str] = _name(200)
+    name: Mapped[str] = _name(250)
     brand_id: Mapped[int] = mapped_column("BrandId", ForeignKey("md_brand.Id"), nullable=False)
     pack_size: Mapped[str | None] = mapped_column("PackSize", String(40))
+    sap_product_id: Mapped[str | None] = mapped_column("SapProductId", String(25))
+    material_code: Mapped[str | None] = mapped_column("MaterialCode", String(50))
+    nrv: Mapped[str | None] = mapped_column("Nrv", String(20))
+    start_date: Mapped[date | None] = mapped_column("StartDate", Date)
+    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_sku_code"),)
 
@@ -189,8 +209,42 @@ class Customer(Base):
     classification: Mapped[str] = mapped_column("Classification", String(40), nullable=False)
     city: Mapped[str | None] = mapped_column("City", String(80))
     country_id: Mapped[int | None] = mapped_column("CountryId", ForeignKey("md_country.Id"))
+    sap_id: Mapped[str | None] = mapped_column("SapId", String(50))
+    billing_name: Mapped[str | None] = mapped_column("BillingName", String(200))
+    # the customer's home geography, as the old system kept it; the yearly,
+    # SKU-level cover is in md_customer_assignment
+    zone_id: Mapped[int | None] = mapped_column("ZoneId", ForeignKey("md_zone.Id"))
+    headquarter_id: Mapped[int | None] = mapped_column("HeadquarterId", ForeignKey("md_headquarter.Id"))
+    territory_id: Mapped[int | None] = mapped_column("TerritoryId", ForeignKey("md_territory.Id"))
+    sub_territory: Mapped[str | None] = mapped_column("SubTerritory", String(120))
+    state: Mapped[str | None] = mapped_column("State", String(80))
+    remark: Mapped[str | None] = mapped_column("Remark", String(200))
+    start_date: Mapped[date | None] = mapped_column("StartDate", Date)
+    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("CustomerCode", name="uq_customer_code"),)
+
+
+class SkuAlias(Base):
+    """Another name a SKU turns up under in distributors' files. The old
+    PRODUCT_ALIAS_1..100 columns, one row per name instead of a hundred columns."""
+    __tablename__ = "md_sku_alias"
+    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
+    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("md_sku.Id"), nullable=False)
+    alias: Mapped[str] = mapped_column("Alias", String(250), nullable=False)
+    __table_args__ = (UniqueConstraint("SkuId", "Alias", name="uq_sku_alias"),
+                      Index("ix_sku_alias", "Alias"))
+
+
+class CustomerAlias(Base):
+    """The old CUSTOMER_ALIAS_1..50 columns, one row per name."""
+    __tablename__ = "md_customer_alias"
+    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column("CustomerId", ForeignKey("md_customer.Id"), nullable=False)
+    alias: Mapped[str] = mapped_column("Alias", String(200), nullable=False)
+    __table_args__ = (UniqueConstraint("CustomerId", "Alias", name="uq_customer_alias"),
+                      Index("ix_customer_alias", "Alias"))
 
 
 # ================================================================= people
@@ -200,6 +254,7 @@ class Designation(Base):
     code: Mapped[str] = _code()
     name: Mapped[str] = _name(80)
     level: Mapped[int] = mapped_column("Level", Integer, nullable=False, default=1)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_designation_code"),)
 
@@ -210,6 +265,7 @@ class Role(Base):
     code: Mapped[str] = _code()
     name: Mapped[str] = _name(80)
     description: Mapped[str | None] = mapped_column("Description", String(300))
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_role_code"),)
 
@@ -220,6 +276,7 @@ class Team(Base):
     code: Mapped[str] = _code()
     name: Mapped[str] = _name(80)
     company_id: Mapped[int | None] = mapped_column("CompanyId", ForeignKey("md_company.Id"))
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_team_code"),)
 
@@ -258,6 +315,10 @@ class Employee(Base):
     email: Mapped[str | None] = mapped_column("Email", String(120))
     phone: Mapped[str | None] = mapped_column("Phone", String(30))
     joining_date: Mapped[date | None] = mapped_column("JoiningDate", Date)
+    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
+    territory_code: Mapped[str | None] = mapped_column("TerritoryCode", String(20))
+    rd_cs_editable: Mapped[int] = mapped_column("RdCsEditable", Integer, nullable=False, default=0)
+    legacy_id: Mapped[int | None] = _legacy()
     active: Mapped[int] = _active()
     __table_args__ = (UniqueConstraint("Code", name="uq_employee_code"),)
 

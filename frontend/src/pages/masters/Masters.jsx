@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { api } from '../../api.js'
 import MasterPage from './MasterPage.jsx'
+import LegacyImport from './LegacyImport.jsx'
 
 // The order the rail reads in: set up first, then structure, then alignment,
 // which leans on everything above it.
@@ -35,10 +36,15 @@ export default function Masters() {
             ))}
           </div>
         ))}
+        <div className="rail-group">
+          <div className="rail-head">Tools</div>
+          <NavLink to="/masters/import" onClick={() => setOpen(false)}>Import old data</NavLink>
+        </div>
       </nav>
       <section className="master-pane">
         <Routes>
           <Route index element={<Navigate to="year" replace />} />
+          <Route path="import" element={<LegacyImport />} />
           {meta.map((m) => (
             <Route key={m.slug} path={m.slug}
                    element={<MasterPage key={m.slug} spec={m} />} />

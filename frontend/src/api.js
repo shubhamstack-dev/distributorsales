@@ -98,6 +98,13 @@ export const api = {
   masterDeleteMany: (slug, ids) => call('POST', `/api/masters/${slug}/delete-many`, { ids }),
   masterBulk: (slug, body) => call('POST', `/api/masters/${slug}/bulk`, body),
   masterCopyYear: (slug, body) => call('POST', `/api/masters/${slug}/copy-year`, body),
+  legacyImport: (files, dryRun, yearId, onProgress) => {
+    const fd = new FormData()
+    files.forEach((f) => fd.append('files', f))
+    fd.append('dry_run', dryRun ? 'true' : 'false')
+    if (yearId) fd.append('year_id', yearId)
+    return upload('/api/legacy-import', fd, onProgress)
+  },
   rate: (frm, to, on) => call('GET', `/api/currency/rate?${qs({ frm, to, on })}`),
   convert: (amount, frm, to, on) => call('GET', `/api/currency/convert?${qs({ amount, frm, to, on })}`),
   // the export needs the token in a header, so it is fetched and then saved

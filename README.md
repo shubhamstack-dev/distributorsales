@@ -66,7 +66,7 @@ than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 57 tests (27 conversion + 30 master data)
+    cd backend && pytest -q        # 62 tests (27 conversion + 30 master data + 5 legacy import)
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real
@@ -118,6 +118,34 @@ with no front-end change.
 creates the new `md_*` tables and adds the new distributor columns (Code,
 Country, contact details). To apply by hand instead: `migrations/001_…sql`
 (old databases only), then `schema.sql`, then `schema_masters.sql`.
+
+## Importing the old SQL Server data
+
+**Masters › Tools › Import old data** brings the old Abbott masters across.
+
+1. In SQL Server Management Studio run `SELECT * FROM dbo.<TABLE>` for each table
+   below, right-click the results → **Copy with Headers**, paste into Excel and
+   save as `<TABLE>.xlsx` (for example `PRODUCT_MASTER.xlsx`). One workbook with
+   a sheet per table, each sheet named after its table, works too.
+2. Choose all the files, press **Check** (a dry run: nothing is saved), read the
+   report, then press **Import**.
+
+| Old table | Becomes |
+|---|---|
+| PRODUCT_MASTER_GROUP | Product groups |
+| PRODUCT_MASTER_BRAND | Brands; REPORTING → a P1/P2/X reporting line per brand; TEAM_ID → Team › Product groups |
+| PRODUCT_MASTER | SKUs (SAP id, material code, NRV, dates); PRODUCT_ALIAS_1..100 → SKU aliases |
+| ZONE, HQ_MASTER, TERRITORY | Zones › Headquarters › Territories (India by default) |
+| CUSTOMER_MASTER | Customers (SAP id, billing name, zone/HQ/territory, dates); CUSTOMER_ALIAS_1..50 → Customer aliases |
+| STATE, customer CLASSIFICATION / REMARK, SUB_TERRITORY | Names stored on the customer |
+| ROLE_MASTER, DESIGNATION, TEAM | Roles, Designations, Teams (matched by name to teams already typed in) |
+| EMPLOYEE_MASTER | Employees, with reporting manager; **passwords are never copied** |
+
+Every imported row keeps its old id in **LegacyId**, so running the import
+again updates instead of duplicating, and nothing is ever deleted. A row pointed
+at but not sent (a customer's HQ 12 with no HQ file) becomes a placeholder
+"HQ #12" until that table is sent. The same import runs from the command line:
+`python -m app.services.legacy_import FILE... [--commit] [--year-id N]`.
 
 ## What it does not do
 

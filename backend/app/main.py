@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from . import config, models as M, models_master  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
-from .routers import api, masters
+from .routers import api, legacy, masters
 from .services import migrate, seed
 from .services.auth import read_token
 
@@ -43,6 +43,7 @@ def health():
 
 app.include_router(api.router)
 app.include_router(masters.router)
+app.include_router(legacy.router)
 
 Base.metadata.create_all(engine)
 try:
