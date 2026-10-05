@@ -106,7 +106,10 @@ def _sweep_staging():
 async def inspect(files: list[UploadFile] = File(...), distributor_id: int = Form(...),
                   db: Session = Depends(get_db)):
     """Open what was sent and say what is in it. Nothing is stored in the
-    database yet: this is the screen where somebody chooses the right files."""
+    database yet: this is the screen where somebody chooses the right files.
+    A zip is opened and the workbooks and PDFs inside it are listed; only the
+    files the distributor's rule names (for Gunjeshwari, the Batch PDF) are
+    ticked."""
     d = db.get(M.Distributor, distributor_id)
     if not d:
         raise HTTPException(404, "No such distributor")

@@ -1,9 +1,15 @@
-"""Reading the distributors' workbooks.
+"""Reading the distributors' workbooks, and the PDF reports some of them send.
 
 Two layouts turn up. A cross-tab - products down the page, customers across,
 quantities on one row and amounts on the next - and a plain row-wise sheet with
 a header naming its columns. Which one a file uses is worked out from the file,
 not from its name, because the names are not reliable.
+
+A PDF is read the same way once its tables are lifted out: every table on every
+page is joined into one list of rows, a header repeated at the top of each page
+is dropped, and the rows go through the same two layouts. Report PDFs often
+print the item (or the party) once as a group heading and leave it blank on the
+lines below, so in a PDF a blank product or customer takes the one above it.
 """
 from __future__ import annotations
 
@@ -15,10 +21,12 @@ from openpyxl import load_workbook
 
 QTY = re.compile(r"^\s*(-?[\d.,]+)\s*\+\s*(-?[\d.,]+)\s*$")
 BOOK = re.compile(r"\.(xlsx|xlsm|xls)$", re.I)
+PDF = re.compile(r"\.pdf$", re.I)
 
 WANT = {
     "customer": ["customername", "customer", "party", "partyname", "shopname"],
-    "product": ["productname", "product", "item", "itemname", "particulars", "prodname"],
+    "product": ["productname", "product", "item", "itemname", "particulars", "prodname",
+                "itemdescription", "productdescription"],
     "qty": ["quantity", "qty"],
     "free": ["freequantity", "freeqty", "free", "fqty"],
     "amount": ["amount", "netamount", "value", "bamount", "basicamount"],
@@ -45,22 +53,27 @@ def _num(v) -> float:
         return 0.0
 
 
+def readable(name: str) -> bool:
+    return bool(BOOK.search(name) or PDF.search(name))
+
+
 def books_in(name: str, data: bytes):
-    """Whatever was uploaded, reduced to workbooks: a zip is opened, a workbook
-    is taken as it is, and anything else (a PDF, say) is left out."""
+    """Whatever was uploaded, reduced to the files this can read: a zip is
+    opened, and the workbooks and PDFs inside it - or sent loose - are taken
+    as they are. Anything else is left out."""
     if name.lower().endswith(".zip"):
         out = []
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             for info in sorted(z.infolist(), key=lambda i: i.filename):
                 inner = info.filename
-                if info.is_dir() or inner.startswith("__MACOSX/") or not BOOK.search(inner):
+                if info.is_dir() or inner.startswith("__MACOSX/") or not readable(inner):
                     continue
                 base = inner.split("/")[-1]
                 if base.startswith(".") or base.startswith("_"):
                     continue
                 out.append((base, z.read(info)))
         return out
-    if BOOK.search(name):
+    if readable(name):
         return [(name.split("/")[-1], data)]
     return []
 
@@ -116,8 +129,9 @@ def _map_columns(rows):
     return None
 
 
-def _parse_row_wise(rows, hr, cmap, out, stats, is_return, negate):
+def _parse_row_wise(rows, hr, cmap, out, stats, is_return, negate, fill_down=False):
     sign = -1 if (is_return and negate) else 1
+    last = {"customer": "", "product": ""}
     for r in range(hr + 1, len(rows)):
         row = rows[r]
 
@@ -126,6 +140,23 @@ def _parse_row_wise(rows, hr, cmap, out, stats, is_return, negate):
 
         cust = str(get("customer") or "").strip()
         prod = str(get("product") or "").strip()
+        if fill_down:
+            # a group heading row (item or party alone, no figures) only sets
+            # what the lines below it belong to
+            if (cust or prod) and get("qty") in (None, "") and get("amount") in (None, ""):
+                if cust:
+                    last["customer"] = cust
+                if prod:
+                    last["product"] = prod
+                continue
+            if not cust and not prod:
+                # figures with no name at all are a subtotal, never a sale
+                continue
+            if _norm(cust).endswith("total") or _norm(prod).endswith("total"):
+                continue
+            cust = cust or last["customer"]
+            prod = prod or last["product"]
+            last["customer"], last["product"] = cust, prod
         if not cust and not prod:
             continue
         if _norm(cust) in ("total", "grandtotal") or _norm(prod) in ("total", "grandtotal"):
@@ -146,8 +177,64 @@ def _parse_row_wise(rows, hr, cmap, out, stats, is_return, negate):
     return "rows (sales return)" if is_return else "rows"
 
 
+def _pdf_rows(data: bytes):
+    """Every table row on every page, as text. Ruled tables are read from their
+    lines; a report printed without lines is read from the gaps between words."""
+    import pdfplumber
+
+    def cell(v):
+        return re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
+
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        for settings in (None, {"vertical_strategy": "text", "horizontal_strategy": "text"}):
+            rows = []
+            for page in pdf.pages:
+                tables = page.extract_tables(settings) if settings else page.extract_tables()
+                for t in tables:
+                    rows.extend([[cell(c) for c in row] for row in t if row])
+            if _cross_tab_header(rows) >= 0 or _map_columns(rows):
+                return rows, len(pdf.pages)
+        return [], len(pdf.pages)
+
+
+def read_pdf(name: str, data: bytes, negate_returns: bool = True) -> dict:
+    """Every sales row in a PDF report, read as one sheet."""
+    out, stats = [], {"omitted": 0}
+    try:
+        rows, pages = _pdf_rows(data)
+    except Exception as e:
+        return {"name": name, "rows": [], "omitted": 0, "sheets": [],
+                "error": f"Not a PDF this can open: {type(e).__name__}"}
+    how = None
+    hr = _cross_tab_header(rows)
+    if hr >= 0:
+        how = _parse_cross_tab(rows, hr, out, stats)
+    else:
+        found = _map_columns(rows)
+        if found:
+            hr, cmap = found
+            head = [_norm(c) for c in rows[hr]]
+            # the header printed again at the top of every page is not a sales row
+            body = [r for r in rows[hr + 1:] if [_norm(c) for c in r] != head]
+            how = _parse_row_wise([rows[hr]] + body, 0, cmap, out, stats,
+                                  bool(re.search(r"return", name, re.I)), negate_returns,
+                                  fill_down=True)
+    sheets = [{"name": f"PDF, {pages} page{'s' if pages != 1 else ''}",
+               "layout": how and f"{how}, from PDF", "rows": len(out),
+               "omitted": stats["omitted"]}]
+    error = None if out else (
+        "No sales rows could be read from this PDF. It needs a table with a header row naming "
+        "customer (or party), product (or item), quantity and amount. A scanned PDF has no "
+        "text to read.")
+    return {"name": name, "rows": out, "omitted": stats["omitted"], "sheets": sheets,
+            "error": error}
+
+
 def read_book(name: str, data: bytes, negate_returns: bool = True) -> dict:
-    """Every sales row in one workbook, with a note of how each sheet was read."""
+    """Every sales row in one workbook (or PDF report), with a note of how each
+    sheet was read."""
+    if PDF.search(name):
+        return read_pdf(name, data, negate_returns)
     out, stats, sheets = [], {"omitted": 0}, []
     try:
         wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)

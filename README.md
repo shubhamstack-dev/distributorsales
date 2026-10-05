@@ -35,7 +35,7 @@ wants. The three are seeded on first run:
 |---|---|---|---|
 | Yetichem | 15th | `INV - 1` sequence | `PW` workbooks |
 | Pharmachem | 10th | read from the file | chosen by hand |
-| Gunjeshwari | 10th | `INV - 1` sequence | chosen by hand |
+| Gunjeshwari | 10th | `INV - 1` sequence | the PDF with **Batch** in its name |
 
 Edit them on the **Rules** screen. A cut-off corrected there is not undone by
 the next restart, and a batch already converted keeps the rules it was made
@@ -43,7 +43,8 @@ with.
 
 **Two file layouts are read**, decided from the file rather than its name: the
 cross-tab (products down, customers across, quantities and amounts on alternate
-rows) and plain row-wise sheets. A sheet named as a return has its quantities
+rows) and plain row-wise sheets. Both are read from Excel workbooks and from
+PDF reports. A sheet named as a return has its quantities
 and amounts negated. A stocks file is refused with a reason rather than
 half-read.
 
@@ -56,6 +57,30 @@ that was offered *and* whether it was used, and the Notes tab in the download
 repeats it. When a total looks wrong, the first question — did we convert the
 right files? — is answered inside the workbook.
 
+## Gunjeshwari's zip of PDFs
+
+Gunjeshwari sends a zip of PDF reports. Choose Gunjeshwari on **Convert** and
+drop the zip: every workbook and PDF inside is listed, and the one whose name
+contains **Batch** (the batch-wise sales report) is the only one ticked. The
+pattern is `batch[^/]*\.pdf$`, matched case-blind, and can be changed on the
+**Rules** screen like any other.
+
+How a PDF is read (`app/services/parse.py`, `read_pdf`):
+
+* Every table on every page is joined into one list. Ruled tables are read
+  from their lines; a report printed without lines is read from the gaps
+  between the words.
+* The header row has to name customer (or party), product (or item), quantity
+  and amount — the same header the row-wise sheets need. The header printed
+  again at the top of each page is dropped.
+* An item (or party) printed once as a heading and left blank on the lines
+  below is carried down onto those lines. Rows with figures but no name, and
+  rows labelled as totals, are subtotals and are left out.
+
+A database from before this change is brought forward on startup: Gunjeshwari's
+pick pattern is set only if it was still empty, so a pattern typed on the Rules
+screen is never overwritten.
+
 ## The rules, in one place
 
 `app/services/rules.py`. On or before the cut-off: the month steps back one and
@@ -66,7 +91,7 @@ than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 62 tests (27 conversion + 30 master data + 5 legacy import)
+    cd backend && pytest -q        # 69 tests (27 conversion + 7 PDF + 30 master data + 5 legacy import)
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real
@@ -149,9 +174,8 @@ at but not sent (a customer's HQ 12 with no HQ file) becomes a placeholder
 
 ## What it does not do
 
-* **PDFs.** Gunjeshwari and Pharmachem originally arrived as PDFs. Extracting
-  tables from them is unreliable enough that refusing beats handing over
-  plausible-looking wrong numbers. Export to Excel first.
+* **Scanned PDFs.** A PDF is read from its text (`pdfplumber`), so a scan or
+  photo has nothing to read and is refused with a reason rather than guessed at.
 * **Linking converted sales rows to the masters.** Batches still store the names
   exactly as the distributor sent them. Mapping those names to Customer IDs and
   SKUs is the natural next step, and the masters are shaped for it.

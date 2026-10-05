@@ -12,6 +12,14 @@ from datetime import date
 from .. import models as M
 from .. import models_master as X
 
+# Gunjeshwari sends a zip of PDF reports; the one to convert has "Batch" in its
+# name (the batch-wise sales report).
+GUNJESHWARI_PICK = r"batch[^/]*\.pdf$"
+GUNJESHWARI_NOTE = ("Zip of PDF reports: the PDF with Batch in its name is picked and its table "
+                    "read. Numbered INV - 1 upwards; customer names are cleaned but not mapped.")
+_GUNJESHWARI_OLD_NOTE = ("Row-wise sheets, numbered INV - 1 upwards. Customer names are cleaned "
+                         "but not mapped against a reference list.")
+
 SEED = [
     ("Yetichem", 15, "seq", 1, r"PW\.(xlsx|xlsm|xls)$",
      "Cross-tab workbooks. The three PW files are picked out of the zip automatically; "
@@ -19,9 +27,7 @@ SEED = [
     ("Pharmachem", 10, "file", 1, None,
      "Row-wise invoice sheets. Invoice numbers come from the file, and a SALES RETURN sheet "
      "has its quantities and amounts negated."),
-    ("Gunjeshwari", 10, "seq", 1, None,
-     "Row-wise sheets, numbered INV - 1 upwards. Customer names are cleaned but not mapped "
-     "against a reference list."),
+    ("Gunjeshwari", 10, "seq", 1, GUNJESHWARI_PICK, GUNJESHWARI_NOTE),
 ]
 
 
@@ -35,6 +41,23 @@ def ensure(db: Session) -> None:
         db.add(M.Distributor(name=name, cutoff_day=cut, invoice_mode=mode,
                              negate_returns=neg, pick_pattern=pick, note=note))
     db.commit()
+
+
+def update_rules(db: Session) -> list[str]:
+    """Bring a seeded rule forward when the way a distributor sends its files
+    changes - but only while it is still on the old default. A pattern or note
+    somebody typed on the Rules screen is left exactly as it is."""
+    done = []
+    d = db.execute(select(M.Distributor)
+                   .where(M.Distributor.name == "Gunjeshwari")).scalar_one_or_none()
+    if d is not None:
+        if not d.pick_pattern:
+            d.pick_pattern = GUNJESHWARI_PICK
+            done.append("Gunjeshwari now picks the Batch PDF")
+        if d.note == _GUNJESHWARI_OLD_NOTE:
+            d.note = GUNJESHWARI_NOTE
+    db.commit()
+    return done
 
 
 # The two countries the distributors sell in, and the rate between their

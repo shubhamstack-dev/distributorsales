@@ -80,8 +80,8 @@ export default function Upload() {
   return (
     <div className="page">
       <h1>Convert</h1>
-      <p className="lead">Drop the zip a distributor sends — or loose workbooks — pick the files
-        that belong to this run, and the rows are stored and given back as the standard sheet.</p>
+      <p className="lead">Drop the zip a distributor sends — or loose workbooks and PDFs — pick the
+        files that belong to this run, and the rows are stored and given back as the standard sheet.</p>
       {err && <div className="alert bad">{err}</div>}
 
       <section className="panel">
@@ -122,19 +122,25 @@ export default function Upload() {
              onKeyDown={(e) => { if (dist && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick.current?.click() } }}
              onDragOver={(e) => e.preventDefault()}
              onDrop={(e) => { e.preventDefault(); if (dist) send(e.dataTransfer.files) }}>
-          <b>{dist ? 'Drop a .zip, or .xlsx files, here — or choose them'
+          <b>{dist ? 'Drop a .zip, or .xlsx or .pdf files, here — or choose them'
             : 'Choose a distributor above first'}</b>
-          <span>A zip is opened and every workbook inside is listed for you to pick from.</span>
-          <input ref={pick} type="file" multiple hidden accept=".zip,.xlsx,.xls,.xlsm"
+          <span>A zip is opened and every workbook and PDF inside is listed for you to pick
+            from.{dist?.name === 'Gunjeshwari' && ' For Gunjeshwari, the PDF with Batch in its name is ticked and read.'}</span>
+          <input ref={pick} type="file" multiple hidden accept=".zip,.xlsx,.xls,.xlsm,.pdf"
                  onChange={(e) => { send(e.target.files); e.target.value = '' }} />
         </div>
         {progress != null && (
           <div className="prog"><div className="bar"><i style={{ width: `${Math.round(progress * 100)}%` }} /></div>
-            <span>{progress < 1 ? `Uploading — ${Math.round(progress * 100)}%` : 'Reading the workbooks…'}</span></div>
+            <span>{progress < 1 ? `Uploading — ${Math.round(progress * 100)}%` : 'Reading the files…'}</span></div>
         )}
         {found?.refused?.length > 0 && (
           <div className="alert warn">{found.refused.join(', ')} ignored — this reads Excel
-            workbooks and zips of them, not PDFs.</div>
+            workbooks, PDFs and zips of them.</div>
+        )}
+        {found && dist?.pick_pattern && !found.files.some((f) => f.suggested) && (
+          <div className="alert warn">Nothing in this upload matches {dist.name}'s rule
+            {dist.name === 'Gunjeshwari' ? ' (a readable PDF with Batch in its name)' : ''}, so
+            nothing is ticked. Check it is the right zip, or tick the file by hand.</div>
         )}
 
         {found && (

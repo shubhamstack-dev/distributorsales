@@ -57,6 +57,8 @@ try:
     _db = SessionLocal()
     try:
         seed.ensure(_db)
+        for done in seed.update_rules(_db):
+            print(f"[startup] {done}", flush=True)
         seed.ensure_masters(_db)
     finally:
         _db.close()

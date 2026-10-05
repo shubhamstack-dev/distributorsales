@@ -80,11 +80,11 @@ def test_special_characters_become_spaces():
     assert clean("STEMETIL 5MG TAB ") == "STEMETIL 5MG TAB"
 
 
-def test_the_zip_is_opened_and_only_workbooks_taken():
+def test_the_zip_is_opened_and_only_workbooks_and_pdfs_taken():
     data = open(ZIP, "rb").read()
     books = books_in("FW__MID-MONTH_SALES.zip", data)
-    assert len(books) == 10
-    assert all(n.endswith(".xlsx") for n, _ in books)
+    assert len([n for n, _ in books if n.endswith(".xlsx")]) == 10
+    assert all(n.endswith((".xlsx", ".pdf")) for n, _ in books)
 
 
 def test_the_cross_tab_reads_to_the_same_numbers():
