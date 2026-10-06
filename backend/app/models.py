@@ -25,6 +25,9 @@ class Distributor(Base):
     negate_returns: Mapped[int] = mapped_column("NegateReturns", Integer, nullable=False, default=1)
     # A regular expression naming the files this distributor's rule asks for.
     pick_pattern: Mapped[str | None] = mapped_column("PickPattern", String(200))
+    # "calc": Rate is Amount / Quantity. "file": Rate is read from the file
+    # where it has a rate column (falling back to the calculation where not).
+    rate_mode: Mapped[str] = mapped_column("RateMode", String(10), nullable=False, default="calc")
     note: Mapped[str | None] = mapped_column("Note", String(500))
     active: Mapped[int] = mapped_column("Active", Integer, nullable=False, default=1)
     # Master details. Added after the first release, so services/migrate.py adds
@@ -112,3 +115,23 @@ class SalesRow(Base):
     is_return: Mapped[int] = mapped_column("IsReturn", Integer, nullable=False, default=0)
 
     batch: Mapped[Batch] = relationship(back_populates="rows")
+
+
+class NameRef(Base):
+    """A distributor's reference list of customer or product names.
+
+    Extracted names are matched against it with every special character and
+    space removed and case ignored; where one matches, the reference spelling
+    replaces the extracted one. Uploading a list replaces the previous one of
+    that kind, so the current list is always the one last sent.
+    """
+    __tablename__ = "name_ref"
+    __table_args__ = (UniqueConstraint("DistributorId", "Kind", "NormName", name="uq_name_ref"),)
+    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
+    distributor_id: Mapped[int] = mapped_column(
+        "DistributorId", ForeignKey("distributor.Id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column("Kind", String(10), nullable=False)       # customer | product
+    name: Mapped[str] = mapped_column("Name", String(200), nullable=False)
+    norm_name: Mapped[str] = mapped_column("NormName", String(200), nullable=False)
+    source_file: Mapped[str | None] = mapped_column("SourceFile", String(255))
+    uploaded_at_utc: Mapped[datetime] = mapped_column("UploadedAtUtc", DateTime, nullable=False)

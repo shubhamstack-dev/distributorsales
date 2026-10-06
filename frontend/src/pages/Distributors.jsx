@@ -40,6 +40,12 @@ export default function Distributors() {
                 <input defaultValue={d.pick_pattern || ''} placeholder="e.g. PW\.(xlsx|xls)$"
                        onBlur={(e) => (e.target.value || '') !== (d.pick_pattern || '')
                          && save(d, { pick_pattern: e.target.value })} /></label>
+              <label>Rate
+                <select defaultValue={d.rate_mode || 'calc'}
+                        onChange={(e) => save(d, { rate_mode: e.target.value })}>
+                  <option value="calc">Amount ÷ Quantity</option>
+                  <option value="file">Read from the file</option>
+                </select></label>
               <label>Sales returns
                 <select defaultValue={d.negate_returns ? '1' : '0'}
                         onChange={(e) => save(d, { negate_returns: e.target.value === '1' })}>

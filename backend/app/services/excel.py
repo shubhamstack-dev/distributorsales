@@ -65,11 +65,14 @@ def build(batch, rows, files) -> bytes:
         ("Invoice No", "Read from the file where present, otherwise numbered in sequence."
                        if batch.invoice_mode == "file"
                        else "INV - 1 upwards, one running number across every file."),
-        ("Rate", "Amount divided by Quantity. Zero where quantity is zero, so a free-only line "
-                 "cannot divide by zero."),
+        ("Rate", ("Read from the file. Where a line has no rate, Amount divided by Quantity."
+                  if (batch.distributor.rate_mode or "calc") == "file" else
+                  "Amount divided by Quantity. Zero where quantity is zero, so a free-only line "
+                  "cannot divide by zero.")),
         ("B.Amount and Amount", "Both read from the file and identical."),
         ("Names", "Special characters removed; punctuation became a space, so 'Pvt.ltd.' reads "
                   "'Pvt ltd' rather than 'Pvtltd'."),
+        ("Name mapping and notes", batch.notes or "No reference name lists were applied."),
         ("", ""),
         ("Rows written", str(batch.row_count)),
         ("Rows omitted", f"{batch.omitted_count} - quantity and free quantity both zero"),

@@ -31,6 +31,10 @@ export default function Upload() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const pick = useRef(null)
+  const [lists, setLists] = useState(null)       // {customer:{count,file,...}, product:{...}}
+  const [listMsg, setListMsg] = useState(null)
+  const custRef = useRef(null)
+  const prodRef = useRef(null)
 
   useEffect(() => {
     // No distributor is chosen for you. Whichever sorted first would otherwise
@@ -44,7 +48,19 @@ export default function Upload() {
     setDistId(id)
     const d = dists.find((x) => String(x.id) === String(id))
     if (d) setCutoff(d.cutoff_day)
-    setFound(null); setSel(new Set())
+    setFound(null); setSel(new Set()); setLists(null); setListMsg(null)
+    if (d) api.nameLists(d.id).then(setLists).catch(() => setLists(null))
+  }
+
+  async function sendList(kind, file) {
+    if (!file || !distId) return
+    setListMsg(null)
+    try {
+      const r = await api.uploadNames(Number(distId), kind, file)
+      setLists(r)
+      setListMsg({ t: `${r.kept} ${kind} names saved from ${file.name}` +
+        (r.read !== r.kept ? ` (${r.read - r.kept} duplicates ignored).` : '.') })
+    } catch (e) { setListMsg({ bad: true, t: e.message }) }
   }
 
   async function send(list) {
@@ -80,8 +96,8 @@ export default function Upload() {
   return (
     <div className="page">
       <h1>Convert</h1>
-      <p className="lead">Drop the zip a distributor sends — or loose workbooks — pick the files
-        that belong to this run, and the rows are stored and given back as the standard sheet.</p>
+      <p className="lead">Drop the zip a distributor sends — or loose workbooks and PDFs — pick the
+        files that belong to this run, and the rows are stored and given back as the standard sheet.</p>
       {err && <div className="alert bad">{err}</div>}
 
       <section className="panel">
@@ -115,6 +131,30 @@ export default function Upload() {
         </>}
       </section>
 
+      {dist && (
+        <section className="panel">
+          <h2>Reference names <span className="fine">(optional)</span></h2>
+          <p className="fine">Upload {dist.name}'s customer list and product list as Excel files.
+            Extracted names that match one — ignoring case, spaces and special characters — are
+            replaced with the name on the list. Each list is kept until you upload a new one.</p>
+          {listMsg && <div className={`alert ${listMsg.bad ? 'bad' : 'ok'}`}>{listMsg.t}</div>}
+          <div className="grid2">
+            {[['customer', 'Customer names', custRef], ['product', 'Product names', prodRef]].map(([k, label, ref]) => (
+              <div key={k}>
+                <b>{label}</b>
+                <p className="fine">{lists?.[k]?.count
+                  ? `${lists[k].count} names, from ${lists[k].file || 'an upload'}`
+                  : 'No list yet — names are kept as extracted.'}</p>
+                <button className="btn sm" onClick={() => ref.current?.click()}>
+                  {lists?.[k]?.count ? 'Replace list' : 'Upload list'}</button>
+                <input ref={ref} type="file" hidden accept=".xlsx,.xlsm"
+                       onChange={(e) => { sendList(k, e.target.files[0]); e.target.value = '' }} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="panel">
         <h2>2 · The files</h2>
         <div className={`drop ${dist ? '' : 'disabled'}`} tabIndex={0} role="button"
@@ -122,19 +162,25 @@ export default function Upload() {
              onKeyDown={(e) => { if (dist && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick.current?.click() } }}
              onDragOver={(e) => e.preventDefault()}
              onDrop={(e) => { e.preventDefault(); if (dist) send(e.dataTransfer.files) }}>
-          <b>{dist ? 'Drop a .zip, or .xlsx files, here — or choose them'
+          <b>{dist ? 'Drop a .zip, or .xlsx or .pdf files, here — or choose them'
             : 'Choose a distributor above first'}</b>
-          <span>A zip is opened and every workbook inside is listed for you to pick from.</span>
-          <input ref={pick} type="file" multiple hidden accept=".zip,.xlsx,.xls,.xlsm"
+          <span>A zip is opened and every workbook and PDF inside is listed for you to pick
+            from.{dist?.name === 'Gunjeshwari' && ' For Gunjeshwari, the PDF with Batch in its name is ticked and read.'}</span>
+          <input ref={pick} type="file" multiple hidden accept=".zip,.xlsx,.xls,.xlsm,.pdf"
                  onChange={(e) => { send(e.target.files); e.target.value = '' }} />
         </div>
         {progress != null && (
           <div className="prog"><div className="bar"><i style={{ width: `${Math.round(progress * 100)}%` }} /></div>
-            <span>{progress < 1 ? `Uploading — ${Math.round(progress * 100)}%` : 'Reading the workbooks…'}</span></div>
+            <span>{progress < 1 ? `Uploading — ${Math.round(progress * 100)}%` : 'Reading the files…'}</span></div>
         )}
         {found?.refused?.length > 0 && (
           <div className="alert warn">{found.refused.join(', ')} ignored — this reads Excel
-            workbooks and zips of them, not PDFs.</div>
+            workbooks, PDFs and zips of them.</div>
+        )}
+        {found && dist?.pick_pattern && !found.files.some((f) => f.suggested) && (
+          <div className="alert warn">Nothing in this upload matches {dist.name}'s rule
+            {dist.name === 'Gunjeshwari' ? ' (a readable PDF with Batch in its name)' : ''}, so
+            nothing is ticked. Check it is the right zip, or tick the file by hand.</div>
         )}
 
         {found && (

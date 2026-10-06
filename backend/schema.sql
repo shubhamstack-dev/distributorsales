@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS distributor (
   InvoiceMode VARCHAR(10) NOT NULL DEFAULT 'seq',   -- seq | file
   NegateReturns TINYINT NOT NULL DEFAULT 1,
   PickPattern VARCHAR(200) NULL,                    -- names the files this rule wants
+  RateMode VARCHAR(10) NOT NULL DEFAULT 'calc',     -- calc (Amount / Quantity) | file
   Note VARCHAR(500) NULL,
   Active TINYINT NOT NULL DEFAULT 1,
   -- master details; the CountryId foreign key is added in schema_masters.sql
@@ -73,4 +74,19 @@ CREATE TABLE IF NOT EXISTS sales_row (
   CONSTRAINT uq_row_seq UNIQUE (BatchId, Seq),
   INDEX ix_row_batch (BatchId),
   CONSTRAINT fk_row_batch FOREIGN KEY (BatchId) REFERENCES batch(Id) ON DELETE CASCADE
+);
+
+-- A distributor's reference names. Extracted customer and product names are
+-- matched against NormName (letters and digits only, upper case) and replaced
+-- with Name where they match.
+CREATE TABLE IF NOT EXISTS name_ref (
+  Id INT AUTO_INCREMENT PRIMARY KEY,
+  DistributorId INT NOT NULL,
+  Kind VARCHAR(10) NOT NULL,                        -- customer | product
+  Name VARCHAR(200) NOT NULL,
+  NormName VARCHAR(200) NOT NULL,
+  SourceFile VARCHAR(255) NULL,
+  UploadedAtUtc DATETIME NOT NULL,
+  CONSTRAINT uq_name_ref UNIQUE (DistributorId, Kind, NormName),
+  CONSTRAINT fk_nr_dist FOREIGN KEY (DistributorId) REFERENCES distributor(Id) ON DELETE CASCADE
 );

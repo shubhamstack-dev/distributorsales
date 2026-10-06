@@ -33,9 +33,9 @@ wants. The three are seeded on first run:
 
 | | Cut-off | Invoice No | Files it picks |
 |---|---|---|---|
-| Yetichem | 15th | `INV - 1` sequence | `PW` workbooks |
+| Yetichem | 15th | `INV - 1` sequence | the three `PW` workbooks (AHCPW, AILGPW, AILNPW .xls) |
 | Pharmachem | 10th | read from the file | chosen by hand |
-| Gunjeshwari | 10th | `INV - 1` sequence | chosen by hand |
+| Gunjeshwari | 10th | `INV - 1` sequence | the PDFs with **Batch** in their name (ALI and AHL BATCHWISE) |
 
 Edit them on the **Rules** screen. A cut-off corrected there is not undone by
 the next restart, and a batch already converted keeps the rules it was made
@@ -43,7 +43,8 @@ with.
 
 **Two file layouts are read**, decided from the file rather than its name: the
 cross-tab (products down, customers across, quantities and amounts on alternate
-rows) and plain row-wise sheets. A sheet named as a return has its quantities
+rows) and plain row-wise sheets. Both are read from Excel workbooks and from
+PDF reports. A sheet named as a return has its quantities
 and amounts negated. A stocks file is refused with a reason rather than
 half-read.
 
@@ -56,6 +57,87 @@ that was offered *and* whether it was used, and the Notes tab in the download
 repeats it. When a total looks wrong, the first question — did we convert the
 right files? — is answered inside the workbook.
 
+## Yetichem's three PW workbooks
+
+Yetichem sends a zip with **AHCPW.xls**, **AILGPW.xls** and **AILNPW.xls**,
+cross-tab workbooks in the older Excel format (read with `xlrd`; a file named
+.xls that is really an .xlsx is opened as one). Choose Yetichem on **Convert**
+and drop the zip: the three PW files are ticked (pattern `PW\.(xlsx|xlsm|xls)$`),
+a stocks file is not, and the three become one sheet.
+
+### The rule, as given
+
+| # | Rule | Where it is done |
+|---|---|---|
+| 1 | Distributor Name is always Yetichem | the distributor chosen on Convert |
+| 2 | Invoice No is `INV - 1`, `INV - 2` … one per row, running across all three files | Invoice No = `INV - 1` sequence |
+| 3 | Uploaded on the 1st–15th: Month is the previous month, otherwise the current month, written in full | cut-off day 15 |
+| 4 | Year is the current year, YYYY | the month rule |
+| 5 | Uploaded on the 1st–15th: Mid Month is N, otherwise Y | cut-off day 15 |
+| 6–7 | Customer Name and Product Name from the file | cross-tab: customers across, products down |
+| 8 | Quantity and Free Quantity from cells like `40 + 0` (40 bought, 0 free). `-40 + 0` (or `- 40 + 0`) is a quantity of -40; quantities below 0 are kept | `parse.QTY` |
+| 9 | Rate = Amount / Quantity (0 for a free-only line) | Rate = **Amount ÷ Quantity** on Rules |
+| 11 | B.Amount and Amount are the same, read from the file (the row under the quantities) | |
+| — | Special characters removed from customer and product names; rows with quantity and free quantity both 0 are left out, as are Total rows and columns | `parse.clean`, cross-tab reader |
+
+## Gunjeshwari's zip of PDFs
+
+Gunjeshwari sends a zip with two batch-wise sales reports, **ALI BATCHWISE.pdf**
+and **AHL BATCHWISE.pdf**. Choose Gunjeshwari on **Convert** and drop the zip:
+every PDF whose name contains **Batch** is ticked (pattern `batch[^/]*\.pdf$`,
+case-blind, editable on **Rules**), and both are combined into one sheet.
+
+### The rule, as given
+
+The sheet has these headings: Distributor Name, Invoice No, Month, Year, Mid
+Month, Customer Name, Product Name, Quantity, Free Quantity, Rate, B.Amount and
+Amount.
+
+| # | Rule | Where it is done |
+|---|---|---|
+| 1 | Distributor Name is always Gunjeshwari | the distributor chosen on Convert |
+| 2 | Invoice No is `INV - 1`, `INV - 2` … one per row, running across both PDFs | Invoice No = `INV - 1` sequence |
+| 3 | Uploaded on the 1st–10th: Month is the previous month, otherwise the current month, written in full (January, February …) | cut-off day 10 |
+| 4 | Year is the current year, YYYY | the month rule |
+| 5 | Uploaded on the 1st–10th: Mid Month is N, otherwise Y | cut-off day 10 |
+| 6 | Customer Name from the file | the PDF table |
+| 7 | Product Name from the file; a product carried on to further lines that start from the quantity gives one row per line, with the product repeated | fill-down in `parse.read_pdf` |
+| 8–10 | Quantity, Free Quantity and Rate from the file | Rate = **Read from the file** on Rules |
+| 11 | B.Amount and Amount are the same, read from the file | |
+| 12 | Product names replaced with the name on the product list where they match | **Reference names** on Convert |
+| 13 | Customer names replaced with the name on the customer list where they match | **Reference names** on Convert |
+| — | Special characters are ignored when matching names | `services/names.py` |
+
+### Reference names
+
+On **Convert**, once Gunjeshwari is chosen, **Reference names** takes two Excel
+files: the customer list and the product list. The name column is the one
+headed Customer Name / Customer / Party (or Product Name / Product / Item);
+without such a header, the first column with text. Each list is kept until a new
+one is uploaded, so it is sent once, not with every zip.
+
+A name matches when the two are equal after removing case, spaces and every
+special character, so *Shree Medical Hall (P) Ltd.* matches *SHREE MEDICAL HALL
+P LTD*. The list's spelling goes into the sheet. Names with no match are kept as
+extracted and listed in the batch notes and the **Notes** tab of the download,
+so the list can be completed.
+
+### How a PDF is read
+
+* Every table on every page is joined into one list. Ruled tables are read from
+  their lines; a report printed without lines from the gaps between words.
+* The header row has to name customer (or party), product (or item), quantity
+  and amount; Free and Rate are read when present. The header repeated on each
+  page is dropped.
+* A party or product printed once as a heading is carried down onto the lines
+  below it. A line with figures and a rate but no names continues the product
+  above (a further batch); one with no rate is a subtotal and is left out, as
+  are lines labelled Total.
+
+A database from before this change is brought forward on startup: the pick
+pattern is set if empty, and the description and Rate-from-file are set only if
+Gunjeshwari's note was still a seeded default — anything typed on Rules stays.
+
 ## The rules, in one place
 
 `app/services/rules.py`. On or before the cut-off: the month steps back one and
@@ -66,7 +148,7 @@ than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 62 tests (27 conversion + 30 master data + 5 legacy import)
+    cd backend && pytest -q        # 84 tests (27 conversion + 7 PDF + 4 Yetichem + 11 Gunjeshwari + 30 master data + 5 legacy import)
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real
@@ -149,9 +231,8 @@ at but not sent (a customer's HQ 12 with no HQ file) becomes a placeholder
 
 ## What it does not do
 
-* **PDFs.** Gunjeshwari and Pharmachem originally arrived as PDFs. Extracting
-  tables from them is unreliable enough that refusing beats handing over
-  plausible-looking wrong numbers. Export to Excel first.
+* **Scanned PDFs.** A PDF is read from its text (`pdfplumber`), so a scan or
+  photo has nothing to read and is refused with a reason rather than guessed at.
 * **Linking converted sales rows to the masters.** Batches still store the names
   exactly as the distributor sent them. Mapping those names to Customer IDs and
   SKUs is the natural next step, and the masters are shaped for it.

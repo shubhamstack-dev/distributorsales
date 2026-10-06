@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from .. import config, models as M
 from ..database import get_db
-from ..services import excel, parse
+from ..services import excel, names as namesvc, parse
 from ..services.auth import issue_token, password_ok
 from ..services.rules import period
 
@@ -41,7 +41,8 @@ def login(body: dict = Body(...)):
 def _dist_out(d: M.Distributor) -> dict:
     return {"id": d.id, "name": d.name, "cutoff_day": d.cutoff_day,
             "invoice_mode": d.invoice_mode, "negate_returns": bool(d.negate_returns),
-            "pick_pattern": d.pick_pattern, "note": d.note, "active": bool(d.active)}
+            "pick_pattern": d.pick_pattern, "note": d.note, "active": bool(d.active),
+            "rate_mode": d.rate_mode or "calc"}
 
 
 @router.get("/distributors")
@@ -64,6 +65,10 @@ def update_distributor(did: int, body: dict = Body(...), db: Session = Depends(g
         if body["invoice_mode"] not in ("seq", "file"):
             raise HTTPException(422, "Invoice mode is either seq or file")
         d.invoice_mode = body["invoice_mode"]
+    if "rate_mode" in body:
+        if body["rate_mode"] not in ("calc", "file"):
+            raise HTTPException(422, "Rate is either calc (Amount / Quantity) or file")
+        d.rate_mode = body["rate_mode"]
     if "negate_returns" in body:
         d.negate_returns = 1 if body["negate_returns"] else 0
     if "pick_pattern" in body:
@@ -79,6 +84,64 @@ def update_distributor(did: int, body: dict = Body(...), db: Session = Depends(g
         d.note = (body["note"] or "").strip() or None
     db.commit()
     return _dist_out(d)
+
+
+# ------------------------------------------------------------ name lists
+def _names_out(db: Session, did: int) -> dict:
+    out = {}
+    for kind in namesvc.KINDS:
+        rows = db.execute(select(M.NameRef).where(M.NameRef.distributor_id == did,
+                                                  M.NameRef.kind == kind)
+                          .order_by(M.NameRef.name)).scalars().all()
+        out[kind] = {"count": len(rows),
+                     "file": rows[0].source_file if rows else None,
+                     "uploaded_at_utc": rows[0].uploaded_at_utc if rows else None,
+                     "sample": [r.name for r in rows[:5]]}
+    return out
+
+
+@router.get("/distributors/{did}/names")
+def name_lists(did: int, db: Session = Depends(get_db)):
+    if not db.get(M.Distributor, did):
+        raise HTTPException(404, "No such distributor")
+    return _names_out(db, did)
+
+
+@router.post("/distributors/{did}/names")
+async def upload_names(did: int, kind: str = Form(...), file: UploadFile = File(...),
+                       db: Session = Depends(get_db)):
+    """Replace one of the distributor's reference lists with the names in an
+    Excel file. The next conversion uses it."""
+    if not db.get(M.Distributor, did):
+        raise HTTPException(404, "No such distributor")
+    if kind not in namesvc.KINDS:
+        raise HTTPException(422, "The list is either customer or product")
+    data = await file.read()
+    try:
+        found = namesvc.read_names(data, kind)
+    except Exception:
+        raise HTTPException(422, "That is not an Excel workbook this can open (.xlsx).")
+    if not found:
+        raise HTTPException(422, f"No {kind} names were found in that workbook.")
+    keep: dict[str, str] = {}
+    for n in found:                      # first spelling of a duplicate wins
+        keep.setdefault(namesvc.norm(n), n[:200])
+    for old in db.execute(select(M.NameRef).where(M.NameRef.distributor_id == did,
+                                                  M.NameRef.kind == kind)).scalars():
+        db.delete(old)
+    db.flush()
+    now = _now()
+    for k, n in keep.items():
+        db.add(M.NameRef(distributor_id=did, kind=kind, name=n, norm_name=k[:200],
+                         source_file=(file.filename or "")[:255], uploaded_at_utc=now))
+    db.commit()
+    return {**_names_out(db, did), "read": len(found), "kept": len(keep)}
+
+
+def _mapper(db: Session, did: int, kind: str) -> namesvc.Mapper:
+    rows = db.execute(select(M.NameRef).where(M.NameRef.distributor_id == did,
+                                              M.NameRef.kind == kind)).scalars()
+    return namesvc.Mapper({r.norm_name: r.name for r in rows})
 
 
 # --------------------------------------------------------------- the upload
@@ -106,7 +169,10 @@ def _sweep_staging():
 async def inspect(files: list[UploadFile] = File(...), distributor_id: int = Form(...),
                   db: Session = Depends(get_db)):
     """Open what was sent and say what is in it. Nothing is stored in the
-    database yet: this is the screen where somebody chooses the right files."""
+    database yet: this is the screen where somebody chooses the right files.
+    A zip is opened and the workbooks and PDFs inside it are listed; only the
+    files the distributor's rule names (for Gunjeshwari, the Batch PDF) are
+    ticked."""
     d = db.get(M.Distributor, distributor_id)
     if not d:
         raise HTTPException(404, "No such distributor")
@@ -171,7 +237,9 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     cutoff = int(body.get("cutoff_day") or d.cutoff_day)
     invoice_mode = body.get("invoice_mode") or d.invoice_mode
     negate = bool(body.get("negate_returns", d.negate_returns))
+    rate_mode = d.rate_mode or "calc"
     p = period(as_of, cutoff)
+    map_customer, map_product = _mapper(db, d.id, "customer"), _mapper(db, d.id, "product")
 
     batch = M.Batch(distributor_id=d.id, source_name=(body.get("source") or "")[:255],
                     as_of=as_of, month_name=p["month"], year=p["year"],
@@ -202,19 +270,28 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
         for x in r["rows"]:
             seq += 1
             inv = x["invoice"] if (invoice_mode == "file" and x["invoice"]) else f"INV - {seq}"
-            rate = 0.0 if x["qty"] == 0 else x["amount"] / x["qty"]
+            if rate_mode == "file" and x.get("rate") is not None:
+                rate = x["rate"]
+            else:
+                rate = 0.0 if x["qty"] == 0 else x["amount"] / x["qty"]
             tot_q += x["qty"]
             tot_a += x["amount"]
             db.add(M.SalesRow(
                 batch_id=batch.id, seq=seq, distributor_name=d.name, invoice_no=inv[:40],
                 month_name=p["month"], year=p["year"], mid_month=p["mid_month"],
-                customer_name=x["customer"][:200], product_name=x["product"][:200],
+                customer_name=map_customer(x["customer"])[:200],
+                product_name=map_product(x["product"])[:200],
                 quantity=x["qty"], free_quantity=x["free"], rate=rate,
                 b_amount=x["amount"], amount=x["amount"], source_file=name,
                 is_return=1 if x["is_return"] else 0))
     if seq == 0:
         db.rollback()
         raise HTTPException(409, "Nothing could be read from the files you chose.")
+    mapped = [m for m in (map_customer.summary("customer"), map_product.summary("product")) if m]
+    if rate_mode == "file":
+        mapped.append("Rate read from the file where it has a rate column.")
+    if mapped:
+        batch.notes = " ".join(([batch.notes] if batch.notes else []) + mapped)
     batch.row_count, batch.omitted_count = seq, omitted
     batch.total_qty, batch.total_amount = tot_q, round(tot_a, 2)
     db.commit()
@@ -222,7 +299,9 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     return {"batch_id": batch.id, "rows": seq, "omitted": omitted,
             "total_qty": tot_q, "total_amount": round(tot_a, 2),
             "month": p["month"], "year": p["year"], "mid_month": p["mid_month"],
-            "wrapped": p["wrapped"]}
+            "wrapped": p["wrapped"],
+            "unmatched_customers": sorted(map_customer.missed),
+            "unmatched_products": sorted(map_product.missed)}
 
 
 # ------------------------------------------------------------------ batches

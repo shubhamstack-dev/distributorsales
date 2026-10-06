@@ -19,6 +19,7 @@ ADDED = {
         ("ContactPerson", "VARCHAR(120) NULL"),
         ("Phone", "VARCHAR(30) NULL"),
         ("Email", "VARCHAR(120) NULL"),
+        ("RateMode", "VARCHAR(10) NOT NULL DEFAULT 'calc'"),
     ],
     # legacy import (the old SQL Server data): its ids and the fields it kept
     **{t: [("LegacyId", "INT NULL")] for t in (

@@ -82,6 +82,13 @@ export const api = {
     return upload('/api/uploads/inspect', fd, onProgress)
   },
   commit: (token_, body) => call('POST', `/api/uploads/${token_}/commit`, body),
+  nameLists: (id) => call('GET', `/api/distributors/${id}/names`),
+  uploadNames: (id, kind, file) => {
+    const fd = new FormData()
+    fd.append('kind', kind)
+    fd.append('file', file)
+    return upload(`/api/distributors/${id}/names`, fd)
+  },
   batches: () => call('GET', '/api/batches'),
   batch: (id) => call('GET', `/api/batches/${id}`),
   rows: (id, page, size, q) =>
