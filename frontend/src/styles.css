@@ -23,7 +23,8 @@ a{color:var(--brand)}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .boot{display:flex;align-items:center;justify-content:center;min-height:100vh;color:var(--muted)}
 .mark{width:26px;height:26px;border-radius:6px;display:inline-block;flex:0 0 26px;
-  background:linear-gradient(90deg,#DA5635,#463E82)}
+  background:url(/aequm-mark.png) center/cover no-repeat, linear-gradient(90deg,#DA5635,#463E82)}
+.signin-head .mark{width:40px;height:40px;flex-basis:40px;border-radius:9px}
 
 .top{background:#12132B;color:#D8DAEC;display:flex;align-items:center;gap:20px;
   padding:11px 22px;position:sticky;top:env(safe-area-inset-top,0px);z-index:20}
