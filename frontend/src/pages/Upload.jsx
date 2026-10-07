@@ -44,6 +44,10 @@ export default function Upload() {
   }, [])
 
   const dist = dists.find((d) => String(d.id) === String(distId))
+  // Gunjeshwari (select_any): every file extracted from the zip can be ticked,
+  // under all conditions, and a ticked file is read under the distributor's rules.
+  const anyFile = !!dist?.select_any
+  const canPick = (f) => anyFile || (f.selectable ?? !f.error)
   function chooseDist(id) {
     setDistId(id)
     const d = dists.find((x) => String(x.id) === String(id))
@@ -80,7 +84,7 @@ export default function Upload() {
     try {
       const r = await api.commit(found.token, {
         distributor_id: Number(distId), as_of: asOf, cutoff_day: Number(cutoff),
-        files: [...sel], source: found.source,
+        files: chosen.map((f) => f.name), source: found.source,
         who: sessionStorage.getItem('ds.who') || 'user',
       })
       nav(`/batches/${r.batch_id}`)
@@ -90,8 +94,9 @@ export default function Upload() {
   const p = period(asOf, Number(cutoff) || 15)
   const shown = (found?.files || []).filter((f) =>
     !filter.trim() || f.name.toLowerCase().includes(filter.trim().toLowerCase()))
-  const chosen = (found?.files || []).filter((f) => sel.has(f.name) && !f.error)
+  const chosen = (found?.files || []).filter((f) => sel.has(f.name) && canPick(f))
   const rows = chosen.reduce((a, f) => a + f.rows, 0)
+  const canConvert = anyFile ? chosen.length > 0 : rows > 0
 
   return (
     <div className="page">
@@ -165,8 +170,11 @@ export default function Upload() {
           <b>{dist ? 'Drop a .zip, or .xlsx or .pdf files, here — or choose them'
             : 'Choose a distributor above first'}</b>
           <span>A zip is opened and every workbook and PDF inside is listed for you to pick
-            from.{dist?.name === 'Gunjeshwari' && ' For Gunjeshwari, the PDF with Batch in its name is ticked and read.'}</span>
-          <input ref={pick} type="file" multiple hidden accept=".zip,.xlsx,.xls,.xlsm,.pdf"
+            from.{anyFile && ` For ${dist.name}, every file extracted from the zip is listed and
+            can be ticked, whatever its name or type; the PDF with Batch in its name is ticked to
+            begin with, and whichever files you tick are read under ${dist.name}'s rules.`}</span>
+          <input ref={pick} type="file" multiple hidden
+                 accept={anyFile ? undefined : '.zip,.xlsx,.xls,.xlsm,.pdf'}
                  onChange={(e) => { send(e.target.files); e.target.value = '' }} />
         </div>
         {progress != null && (
@@ -179,8 +187,9 @@ export default function Upload() {
         )}
         {found && dist?.pick_pattern && !found.files.some((f) => f.suggested) && (
           <div className="alert warn">Nothing in this upload matches {dist.name}'s rule
-            {dist.name === 'Gunjeshwari' ? ' (a readable PDF with Batch in its name)' : ''}, so
-            nothing is ticked. Check it is the right zip, or tick the file by hand.</div>
+            {anyFile ? ' (a readable PDF with Batch in its name)' : ''}, so
+            nothing is ticked. Check it is the right zip, or tick the file by hand
+            {anyFile ? ' — any file below can be ticked' : ''}.</div>
         )}
 
         {found && (
@@ -189,14 +198,14 @@ export default function Upload() {
               <input placeholder="Filter by name, e.g. PW" value={filter}
                      onChange={(e) => setFilter(e.target.value)} />
               <button className="btn sm" onClick={() => setSel(new Set([...sel,
-                ...shown.filter((f) => !f.error).map((f) => f.name)]))}>Select all shown</button>
+                ...shown.filter(canPick).map((f) => f.name)]))}>Select all shown</button>
               <button className="btn sm" onClick={() => setSel(new Set())}>Select none</button>
               <span className="fine">{chosen.length} of {found.files.length} selected · {rows} rows</span>
             </div>
             <ul className="files">
               {shown.map((f) => (
                 <li key={f.name} className={sel.has(f.name) ? '' : 'off'}>
-                  <input type="checkbox" checked={sel.has(f.name)} disabled={!!f.error}
+                  <input type="checkbox" checked={sel.has(f.name)} disabled={!canPick(f)}
                          aria-label={`Convert ${f.name}`}
                          onChange={(e) => {
                            const n = new Set(sel)
@@ -204,7 +213,8 @@ export default function Upload() {
                            setSel(n)
                          }} />
                   <span className="nm">{f.name}</span>
-                  {f.error ? <span className="chip bad">could not read</span>
+                  {f.error ? <span className="chip bad">{anyFile ? 'no rows found — can still be ticked'
+                    : 'could not read'}</span>
                     : <span className="chip ok">{f.rows} rows</span>}
                   <span className="meta">{f.error || f.layout}</span>
                 </li>
@@ -212,11 +222,13 @@ export default function Upload() {
               {!shown.length && <li className="fine">Nothing matches that filter.</li>}
             </ul>
             <div className="actions">
-              <button className="btn primary" disabled={busy || rows === 0} onClick={convert}>
+              <button className="btn primary" disabled={busy || !canConvert} onClick={convert}>
                 {busy ? 'Converting…' : `Convert ${chosen.length} file${chosen.length === 1 ? '' : 's'}`}
               </button>
-              <span className="fine">Nothing is ticked by itself except the files this
-                distributor's rule names.</span>
+              <span className="fine">{anyFile
+                ? `Tick any file — your choice overrides ${dist.name}'s file-name rule. Ticked
+                  files are read under ${dist.name}'s rules; one with no rows is noted in the batch.`
+                : "Nothing is ticked by itself except the files this distributor's rule names."}</span>
             </div>
           </>
         )}

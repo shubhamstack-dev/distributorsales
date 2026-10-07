@@ -17,6 +17,13 @@ from ..database import get_db
 from ..services import excel, names as namesvc, parse
 from ..services.auth import issue_token, password_ok
 from ..services.rules import period
+from ..services.seed import SELECT_ANY
+
+
+def _any_file(d) -> bool:
+    """Every extracted file can be chosen, and a chosen file is read under all
+    conditions (see seed.SELECT_ANY)."""
+    return d.name in SELECT_ANY
 
 router = APIRouter(prefix="/api")
 
@@ -42,7 +49,7 @@ def _dist_out(d: M.Distributor) -> dict:
     return {"id": d.id, "name": d.name, "cutoff_day": d.cutoff_day,
             "invoice_mode": d.invoice_mode, "negate_returns": bool(d.negate_returns),
             "pick_pattern": d.pick_pattern, "note": d.note, "active": bool(d.active),
-            "rate_mode": d.rate_mode or "calc"}
+            "rate_mode": d.rate_mode or "calc", "select_any": _any_file(d)}
 
 
 @router.get("/distributors")
@@ -172,7 +179,8 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
     database yet: this is the screen where somebody chooses the right files.
     A zip is opened and the workbooks and PDFs inside it are listed; only the
     files the distributor's rule names (for Gunjeshwari, the Batch PDF) are
-    ticked."""
+    ticked. For a distributor in SELECT_ANY (Gunjeshwari) every file extracted
+    from the zip is listed and can be ticked, whatever its name or type."""
     d = db.get(M.Distributor, distributor_id)
     if not d:
         raise HTTPException(404, "No such distributor")
@@ -191,18 +199,19 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
             shutil.rmtree(folder, ignore_errors=True)
             raise HTTPException(413, f"More than {config.MAX_UPLOAD_MB} MB in one go.")
         source_names.append(up.filename or "upload")
-        found = parse.books_in(up.filename or "upload", data)
+        found = parse.books_in(up.filename or "upload", data, everything=_any_file(d))
         if not found:
             refused.append(up.filename or "upload")
         books.extend(found)
 
     import re as _re
     pick = _re.compile(d.pick_pattern, _re.I) if d.pick_pattern else None
+    any_file = _any_file(d)
     out = []
     for name, data in books:
         with open(os.path.join(folder, name), "wb") as fh:
             fh.write(data)
-        r = parse.read_book(name, data, bool(d.negate_returns))
+        r = parse.read_book(name, data, bool(d.negate_returns), any_file=any_file)
         out.append({
             "name": name, "rows": len(r["rows"]), "omitted": r["omitted"],
             "error": r["error"],
@@ -212,6 +221,9 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
             # left unticked, because converting a stocks file silently would be
             # worse than asking.
             "suggested": bool(pick and pick.search(name) and not r["error"]),
+            # Whether the person may tick it. Under SELECT_ANY every extracted
+            # file may be, the name rule notwithstanding.
+            "selectable": any_file or not r["error"],
         })
     return {"token": token, "source": ", ".join(source_names), "files": out,
             "refused": refused, "distributor": _dist_out(d)}
@@ -238,6 +250,8 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     invoice_mode = body.get("invoice_mode") or d.invoice_mode
     negate = bool(body.get("negate_returns", d.negate_returns))
     rate_mode = d.rate_mode or "calc"
+    any_file = _any_file(d)
+    on_disk = sorted(os.listdir(folder))
     p = period(as_of, cutoff)
     map_customer, map_product = _mapper(db, d.id, "customer"), _mapper(db, d.id, "product")
 
@@ -251,13 +265,15 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     db.flush()
 
     seq, omitted, tot_q, tot_a = 0, 0, 0.0, 0.0
-    on_disk = sorted(os.listdir(folder))
+    unread = []
     for name in on_disk:
         used = name in chosen
         path = os.path.join(folder, name)
         with open(path, "rb") as fh:
             data = fh.read()
-        r = parse.read_book(name, data, negate) if used else None
+        r = parse.read_book(name, data, negate, any_file=any_file) if used else None
+        if r and not r["rows"]:
+            unread.append(name)
         bf = M.BatchFile(batch_id=batch.id, file_name=name, used=1 if used else 0,
                          layout=(", ".join(s["layout"] for s in r["sheets"] if s["layout"])
                                  if r else None),
@@ -286,8 +302,11 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
                 is_return=1 if x["is_return"] else 0))
     if seq == 0:
         db.rollback()
-        raise HTTPException(409, "Nothing could be read from the files you chose.")
+        raise HTTPException(409, "Nothing could be read from the files you chose"
+                            + (f" ({', '.join(unread)})" if unread else "") + ".")
     mapped = [m for m in (map_customer.summary("customer"), map_product.summary("product")) if m]
+    if unread:
+        mapped.append("Chosen but no sales rows found in: " + ", ".join(unread) + ".")
     if rate_mode == "file":
         mapped.append("Rate read from the file where it has a rate column.")
     if mapped:

@@ -87,6 +87,32 @@ and **AHL BATCHWISE.pdf**. Choose Gunjeshwari on **Convert** and drop the zip:
 every PDF whose name contains **Batch** is ticked (pattern `batch[^/]*\.pdf$`,
 case-blind, editable on **Rules**), and both are combined into one sheet.
 
+### Choosing the files — under all conditions
+
+For Gunjeshwari **every file extracted from the zip is listed and can be
+ticked**, whatever its name, its type, or whether the reader understood it at
+first sight. The Batch pattern only decides what is ticked to begin with; what
+you tick is what is converted, and that choice overrides the file-name rule.
+
+* Every file in the zip is offered (not only PDFs and workbooks), a zip inside
+  the zip is opened too, and two files with the same name in different folders
+  are both kept (the second as `name (2).pdf`). Only folders and the `__MACOSX`
+  / `._` / `.DS_Store` files a Mac adds are left out.
+* A ticked file is read under the rules below. If the strict reading finds
+  nothing, it is read more loosely: a header in other words (A/c Name, Party,
+  Description, Sale Qty, Sch, PTR, Value …); no customer column, with the party
+  taken from a heading line (`Party Name : …`) above the items; no amount
+  column, with Amount = Quantity × Rate; and for a PDF with no table at all,
+  line by line — a line of words names the party, a line ending in figures is a
+  sale, a line starting with a batch number carries on the product above.
+  CSV/text files are read too.
+* A ticked file in which nothing can be found does not stop the batch; it is
+  named in the batch notes. If none of the ticked files has rows, the convert is
+  refused and the files are named.
+
+Which distributors work this way is `SELECT_ANY` in `app/services/seed.py`
+(Gunjeshwari only); Yetichem and Pharmachem are unchanged.
+
 ### The rule, as given
 
 The sheet has these headings: Distributor Name, Invoice No, Month, Year, Mid
@@ -148,7 +174,7 @@ than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 84 tests (27 conversion + 7 PDF + 4 Yetichem + 11 Gunjeshwari + 30 master data + 5 legacy import)
+    cd backend && pytest -q        # 93 tests (27 conversion + 7 PDF + 4 Yetichem + 11 Gunjeshwari + 9 Gunjeshwari hand-picked files + 30 master data + 5 legacy import)
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real

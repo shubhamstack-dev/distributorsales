@@ -31,6 +31,12 @@ _GUNJESHWARI_OLD_NOTES = (
     "Numbered INV - 1 upwards; customer names are cleaned but not mapped.")
 _GUNJESHWARI_OLD_NOTE = _GUNJESHWARI_OLD_NOTES[0]
 RATE_FROM_FILE = {"Gunjeshwari"}
+# Distributors whose files are chosen by hand under all conditions: every file
+# extracted from the zip is offered and can be ticked, whatever its name, type
+# or whether the strict reader understood it, and a ticked file is read (more
+# loosely if need be) under the distributor's rules. The Batch pattern above
+# then only decides what is ticked to begin with; the person's choice wins.
+SELECT_ANY = {"Gunjeshwari"}
 
 # Yetichem sends a zip with three cross-tab workbooks, AHCPW.xls, AILGPW.xls
 # and AILNPW.xls; the PW pattern picks all three and they become one sheet.
