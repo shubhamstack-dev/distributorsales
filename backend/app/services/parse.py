@@ -262,8 +262,94 @@ def _pdf_rows(data: bytes):
         return [], len(pdf.pages)
 
 
+# ---------------------------------------------------------------------------
+# "Sales Challan Analysis - Customer/Product wise" (Gunjeshwari's BATCHWISE PDFs:
+# AIL / AHPL / ALI / AHL SALES BATCHWISE). A printed report without a table:
+#   Sh. Name CA055 AISHWARYA MED.DIST, KTM                      <- customer heading
+#   30/09/2026 AIL84-0042 INDERAL TAB 10 MG (20*2*15`s) Strip INA26002 03/2029 2000.00 0.00 24.6000 49200.00 -0.27 49199.73
+#   INA26004 04/2029 200.00 0.00 24.6000 4920.00 0.00 4920.00   <- same product, another batch
+#   30/09/2026 AIL84-0052 Strip INA26003 03/2029 1800.00 ...      <- same product, another challan
+#   Product Total / Customer Total / Grand Total ...              <- skipped
+# Each sale line ends: Unit Batch Expiry(MM/YYYY) Qty Free Rate Amount Add/Less Net.
+_CA_TITLE = re.compile(r"sales\s+challan\s+analysis", re.I)
+_CA_CUST = re.compile(r"^\s*Sh\.?\s*Name\s+(\S+)\s+(.+?)\s*$", re.I)
+_CA_NUM = r"-?[\d,]+(?:\.\d+)?"
+_CA_TAIL = re.compile(r"(?:^|\s)(?:(?P<unit>[A-Za-z][\w.]*)\s+)?(?P<batch>\S+)\s+(?P<exp>\d{1,2}/\d{4})\s+"
+                      rf"(?P<qty>{_CA_NUM})\s+(?P<free>{_CA_NUM})\s+(?P<rate>{_CA_NUM})\s+(?P<amt>{_CA_NUM})"
+                      rf"\s+(?P<adj>{_CA_NUM})\s+(?P<net>{_CA_NUM})\s*$")
+_CA_HEAD = re.compile(r"^\s*(?P<date>\d{1,2}/\d{1,2}/\d{4})\s+(?P<challan>\S+)\s*(?P<rest>.*)$")
+_CA_UNITS = {"strip", "strips", "bottle", "btl", "tube", "vial", "amp", "ampoule", "box", "pcs", "pc",
+             "nos", "no", "pack", "pkt", "sachet", "jar", "can", "kit", "tab", "cap", "unit", "each"}
+
+
+def _challan_analysis(data: bytes, out, stats, is_return, negate):
+    """Read a 'Sales Challan Analysis' report line by line. Returns
+    (layout, pages), or (None, pages) when the PDF is not this report."""
+    import pdfplumber
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        pages = len(pdf.pages)
+        lines = []
+        for page in pdf.pages:
+            lines.extend((page.extract_text() or "").split("\n"))
+    if not any(_CA_TITLE.search(l) for l in lines[:12]):
+        return None, pages
+    sign = -1 if (is_return and negate) else 1
+    cust = prod = challan = ""
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        low = line.lower()
+        if "total" in low and re.search(r"(product|customer|grand)\s+total", low):
+            continue
+        m = _CA_CUST.match(line)
+        if m:
+            cust, prod = m.group(2).strip(), ""
+            continue
+        t = _CA_TAIL.search(line)
+        if not t:
+            continue                                   # page header, title, column names
+        head = line[:t.start()].strip()
+        unit = t.group("unit") or ""
+        h = _CA_HEAD.match(head + " ") if head else None
+        if h:
+            challan = h.group("challan")
+            name = h.group("rest").strip()
+            if unit and unit.lower() not in _CA_UNITS:
+                name, unit = (name + " " + unit).strip(), ""   # the "unit" was the product's last word
+            if name:
+                prod = name
+        elif head:
+            # a wrapped product name without date: keep it as the product
+            prod = (head + (" " + unit if unit and unit.lower() not in _CA_UNITS else "")).strip()
+        if not prod or not cust:
+            stats["omitted"] += 1
+            continue
+        q, f = _num(t.group("qty")), _num(t.group("free"))
+        if q == 0 and f == 0:
+            stats["omitted"] += 1
+            continue
+        out.append({"customer": clean(cust), "product": clean(prod),
+                    "qty": q * sign, "free": f * sign, "amount": _num(t.group("amt")) * sign,
+                    "invoice": challan or None, "rate": _num(t.group("rate")),
+                    "is_return": bool(is_return)})
+    return ("challan analysis (sales return)" if is_return else "challan analysis"), pages
+
+
 def read_pdf(name: str, data: bytes, negate_returns: bool = True) -> dict:
     """Every sales row in a PDF report, read as one sheet."""
+    out, stats = [], {"omitted": 0}
+    is_ret = bool(re.search(r"return", name, re.I))
+    try:
+        how, pages = _challan_analysis(data, out, stats, is_ret, negate_returns)
+    except Exception:
+        how, out, stats = None, [], {"omitted": 0}
+    if how:
+        return {"name": name, "rows": out, "omitted": stats["omitted"],
+                "sheets": [{"name": f"PDF, {pages} page{'s' if pages != 1 else ''}",
+                            "layout": f"{how}, from PDF", "rows": len(out),
+                            "omitted": stats["omitted"]}],
+                "error": None if out else "The Sales Challan Analysis report has no sale lines."}
     out, stats = [], {"omitted": 0}
     try:
         rows, pages = _pdf_rows(data)

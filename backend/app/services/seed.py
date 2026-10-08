@@ -16,13 +16,14 @@ from .. import models_master as X
 # Two zip files are uploaded together; the files to convert are the ones named
 # ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf extracted from them, combined into
 # one twelve-column sheet.
-GUNJESHWARI_PICK = r"(ali|ahl)\s*batch\s*wise[^/]*\.pdf$"
-GUNJESHWARI_NOTE = ("Two zips uploaded together: the ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf files "
-                    "extracted from them are picked and combined into one sheet, numbered INV - 1 "
-                    "upwards. Month/Mid Month: 1st-10th = previous month, N; else current month, Y. "
-                    "Quantity, Free Quantity, Rate and Amount (= B.Amount) from the PDF; a product "
-                    "repeated from the quantity is its own row. Customer and product names replaced "
-                    "from the Excel lists where they match, ignoring special characters.")
+GUNJESHWARI_PICK = r"(ail|ali|ahl|ahpl)[^/]*batch\s*wise[^/]*\.pdf$"
+GUNJESHWARI_NOTE = ("Zips uploaded together: the SALES BATCHWISE PDFs (AIL, AHPL, ALI or AHL) are "
+                    "picked and combined into one sheet, numbered INV - 1 upwards. Month/Mid Month: "
+                    "1st-10th = previous month, N; else current month, Y. The 'Sales Challan "
+                    "Analysis' report is read line by line: customer from 'Sh. Name', product, "
+                    "Quantity, Free, Rate and Amount (= B.Amount) from each batch line. Customer "
+                    "and product names replaced from the Excel lists where they match, ignoring "
+                    "special characters.")
 # Earlier seeded notes and pick patterns. One still reading a seeded default
 # was never edited by hand, so it is brought forward; anything else is kept.
 _GUNJESHWARI_OLD_NOTES = (
@@ -35,9 +36,16 @@ _GUNJESHWARI_OLD_NOTES = (
     "Quantity, Free Quantity, Rate and Amount (= B.Amount) are read from the PDF; a "
     "product repeated on lines starting with a quantity becomes one row per line. "
     "Customer and product names are replaced from the reference lists where they "
-    "match, ignoring special characters.")
+    "match, ignoring special characters.",
+    "Two zips uploaded together: the ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf files "
+    "extracted from them are picked and combined into one sheet, numbered INV - 1 "
+    "upwards. Month/Mid Month: 1st-10th = previous month, N; else current month, Y. "
+    "Quantity, Free Quantity, Rate and Amount (= B.Amount) from the PDF; a product "
+    "repeated from the quantity is its own row. Customer and product names replaced "
+    "from the Excel lists where they match, ignoring special characters.")
+
 _GUNJESHWARI_OLD_NOTE = _GUNJESHWARI_OLD_NOTES[0]
-_GUNJESHWARI_OLD_PICKS = (r"batch[^/]*\.pdf$",)
+_GUNJESHWARI_OLD_PICKS = (r"batch[^/]*\.pdf$", r"(ali|ahl)\s*batch\s*wise[^/]*\.pdf$")
 RATE_FROM_FILE = {"Gunjeshwari"}
 # Distributors whose files are chosen by hand under all conditions: every file
 # extracted from the zip is offered and can be ticked, whatever its name, type
