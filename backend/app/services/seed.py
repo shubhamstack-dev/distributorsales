@@ -12,29 +12,37 @@ from datetime import date
 from .. import models as M
 from .. import models_master as X
 
-# Gunjeshwari sends a zip of PDF reports. The two to convert are the batch-wise
-# sales reports (ALI BATCHWISE.pdf and AHL BATCHWISE.pdf); both are picked and
-# combined into one sheet.
-GUNJESHWARI_PICK = r"batch[^/]*\.pdf$"
-GUNJESHWARI_NOTE = ("Zip with ALI BATCHWISE.pdf and AHL BATCHWISE.pdf: every PDF with Batch in its "
-                    "name is picked and combined into one sheet, numbered INV - 1 upwards across both. "
-                    "Quantity, Free Quantity, Rate and Amount (= B.Amount) are read from the PDF; a "
-                    "product repeated on lines starting with a quantity becomes one row per line. "
-                    "Customer and product names are replaced from the reference lists where they "
-                    "match, ignoring special characters.")
-# Earlier seeded notes. A note still reading one of these was never edited by
-# hand, so it is brought forward; anything else is left alone.
+# Gunjeshwari's rule, as given (replaces the earlier Gunjeshwari rule).
+# Two zip files are uploaded together; the files to convert are the ones named
+# ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf extracted from them, combined into
+# one twelve-column sheet.
+GUNJESHWARI_PICK = r"(ali|ahl)\s*batch\s*wise[^/]*\.pdf$"
+GUNJESHWARI_NOTE = ("Two zips uploaded together: the ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf files "
+                    "extracted from them are picked and combined into one sheet, numbered INV - 1 "
+                    "upwards. Month/Mid Month: 1st-10th = previous month, N; else current month, Y. "
+                    "Quantity, Free Quantity, Rate and Amount (= B.Amount) from the PDF; a product "
+                    "repeated from the quantity is its own row. Customer and product names replaced "
+                    "from the Excel lists where they match, ignoring special characters.")
+# Earlier seeded notes and pick patterns. One still reading a seeded default
+# was never edited by hand, so it is brought forward; anything else is kept.
 _GUNJESHWARI_OLD_NOTES = (
     "Row-wise sheets, numbered INV - 1 upwards. Customer names are cleaned but not mapped "
     "against a reference list.",
     "Zip of PDF reports: the PDF with Batch in its name is picked and its table read. "
-    "Numbered INV - 1 upwards; customer names are cleaned but not mapped.")
+    "Numbered INV - 1 upwards; customer names are cleaned but not mapped.",
+    "Zip with ALI BATCHWISE.pdf and AHL BATCHWISE.pdf: every PDF with Batch in its "
+    "name is picked and combined into one sheet, numbered INV - 1 upwards across both. "
+    "Quantity, Free Quantity, Rate and Amount (= B.Amount) are read from the PDF; a "
+    "product repeated on lines starting with a quantity becomes one row per line. "
+    "Customer and product names are replaced from the reference lists where they "
+    "match, ignoring special characters.")
 _GUNJESHWARI_OLD_NOTE = _GUNJESHWARI_OLD_NOTES[0]
+_GUNJESHWARI_OLD_PICKS = (r"batch[^/]*\.pdf$",)
 RATE_FROM_FILE = {"Gunjeshwari"}
 # Distributors whose files are chosen by hand under all conditions: every file
 # extracted from the zip is offered and can be ticked, whatever its name, type
 # or whether the strict reader understood it, and a ticked file is read (more
-# loosely if need be) under the distributor's rules. The Batch pattern above
+# loosely if need be) under the distributor's rules. The ALI/AHL BATCHWISE pattern above
 # then only decides what is ticked to begin with; the person's choice wins.
 SELECT_ANY = {"Gunjeshwari"}
 
@@ -84,15 +92,15 @@ def update_rules(db: Session) -> list[str]:
     d = db.execute(select(M.Distributor)
                    .where(M.Distributor.name == "Gunjeshwari")).scalar_one_or_none()
     if d is not None:
-        if not d.pick_pattern:
+        if not d.pick_pattern or d.pick_pattern in _GUNJESHWARI_OLD_PICKS:
             d.pick_pattern = GUNJESHWARI_PICK
-            done.append("Gunjeshwari now picks the Batch PDF")
+            done.append("Gunjeshwari now picks ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf")
         if d.note in _GUNJESHWARI_OLD_NOTES:
             # still on a seeded default, so the newer rules come with it:
             # the new description, and Rate read from the file
             d.note = GUNJESHWARI_NOTE
             d.rate_mode = "file"
-            done.append("Gunjeshwari now reads Rate from the file")
+            done.append("Gunjeshwari's rule replaced with the current one (Rate from the file)")
     db.commit()
     return done
 

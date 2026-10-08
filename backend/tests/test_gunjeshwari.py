@@ -51,6 +51,14 @@ def _zip():
     return buf.getvalue()
 
 
+def _zip_of(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for n, d in files.items():
+            z.writestr(n, d)
+    return buf.getvalue()
+
+
 def _xlsx(head, values):
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -215,3 +223,34 @@ def test_an_old_database_gets_rate_from_file_with_the_new_note():
         db.commit()
     finally:
         db.close()
+
+
+
+# ===================================================== two zips sent together
+def test_two_zips_uploaded_together_are_combined(tok, gunj):
+    # ALI in one zip, AHL in the other, each with a file that is not a batch report
+    first = _zip_of({"ALI/ALI BATCHWISE.pdf": ALI, "ALI/Outstanding.pdf": AHL})
+    second = _zip_of({"AHL/AHL BATCHWISE 07-10.pdf": AHL, "AHL/Outstanding.pdf": AHL})
+    r = ok(c.post("/api/uploads/inspect", headers=H(tok),
+                  files=[("files", ("ALI.zip", first, "application/zip")),
+                         ("files", ("AHL.zip", second, "application/zip"))],
+                  data={"distributor_id": str(gunj["id"])}))
+    names_ = sorted(f["name"] for f in r["files"])
+    # the two Outstanding.pdf files are both kept, neither overwrites the other
+    assert names_ == ["AHL BATCHWISE 07-10.pdf", "ALI BATCHWISE.pdf", "Outstanding (2).pdf",
+                      "Outstanding.pdf"]
+    picked = sorted(f["name"] for f in r["files"] if f["suggested"])
+    assert picked == ["AHL BATCHWISE 07-10.pdf", "ALI BATCHWISE.pdf"]
+    assert r["source"] == "ALI.zip, AHL.zip"
+    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+        "distributor_id": gunj["id"], "as_of": "2026-10-20", "files": picked,
+        "source": r["source"]}))
+    assert b["rows"] == 5 and b["total_qty"] == 42 and b["total_amount"] == 643.00
+    assert (b["month"], b["year"], b["mid_month"]) == ("October", 2026, "Y")
+    rows = ok(c.get(f"/api/batches/{b['batch_id']}/rows?size=50", headers=H(tok)))["rows"]
+    assert [x["invoice_no"] for x in rows] == [f"INV - {i}" for i in range(1, 6)]
+
+
+def test_the_seeded_rule_is_the_new_one():
+    assert "ALI BATCHWISE" in seed.GUNJESHWARI_NOTE and "AHL BATCHWISE" in seed.GUNJESHWARI_NOTE
+    assert "Two zips" in seed.GUNJESHWARI_NOTE and len(seed.GUNJESHWARI_NOTE) <= 500

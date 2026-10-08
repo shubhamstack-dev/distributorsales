@@ -35,7 +35,7 @@ wants. The three are seeded on first run:
 |---|---|---|---|
 | Yetichem | 15th | `INV - 1` sequence | the three `PW` workbooks (AHCPW, AILGPW, AILNPW .xls) |
 | Pharmachem | 10th | read from the file | chosen by hand |
-| Gunjeshwari | 10th | `INV - 1` sequence | the PDFs with **Batch** in their name (ALI and AHL BATCHWISE) |
+| Gunjeshwari | 10th | `INV - 1` sequence | **ALI BATCHWISE\*.pdf** and **AHL BATCHWISE\*.pdf**, from two zips uploaded together |
 
 Edit them on the **Rules** screen. A cut-off corrected there is not undone by
 the next restart, and a batch already converted keeps the rules it was made
@@ -80,18 +80,20 @@ a stocks file is not, and the three become one sheet.
 | 11 | B.Amount and Amount are the same, read from the file (the row under the quantities) | |
 | — | Special characters removed from customer and product names; rows with quantity and free quantity both 0 are left out, as are Total rows and columns | `parse.clean`, cross-tab reader |
 
-## Gunjeshwari's zip of PDFs
+## Gunjeshwari's two zips of PDFs
 
-Gunjeshwari sends a zip with two batch-wise sales reports, **ALI BATCHWISE.pdf**
-and **AHL BATCHWISE.pdf**. Choose Gunjeshwari on **Convert** and drop the zip:
-every PDF whose name contains **Batch** is ticked (pattern `batch[^/]*\.pdf$`,
-case-blind, editable on **Rules**), and both are combined into one sheet.
+Gunjeshwari sends **two zip files**, uploaded together. The files to convert are
+the ones named **ALI BATCHWISE\*.pdf** and **AHL BATCHWISE\*.pdf** extracted from
+them. Choose Gunjeshwari on **Convert** and drop both zips at once: those PDFs are
+ticked (pattern `(ali|ahl)\s*batch\s*wise[^/]*\.pdf$`, case-blind, editable on
+**Rules**) and combined into one .xlsx sheet. If both zips hold a file with the
+same name, both are kept (the second as `name (2).pdf`).
 
 ### Choosing the files — under all conditions
 
-For Gunjeshwari **every file extracted from the zip is listed and can be
+For Gunjeshwari **every file extracted from the zips is listed and can be
 ticked**, whatever its name, its type, or whether the reader understood it at
-first sight. The Batch pattern only decides what is ticked to begin with; what
+first sight. The ALI/AHL BATCHWISE pattern only decides what is ticked to begin with; what
 you tick is what is converted, and that choice overrides the file-name rule.
 
 * Every file in the zip is offered (not only PDFs and workbooks), a zip inside
@@ -115,24 +117,27 @@ Which distributors work this way is `SELECT_ANY` in `app/services/seed.py`
 
 ### The rule, as given
 
-The sheet has these headings: Distributor Name, Invoice No, Month, Year, Mid
-Month, Customer Name, Product Name, Quantity, Free Quantity, Rate, B.Amount and
-Amount.
+Create an Excel sheet (.xlsx) from the ALI BATCHWISE\*.pdf and AHL
+BATCHWISE\*.pdf files extracted from the two zips uploaded together, with these
+headings: Distributor Name, Invoice No, Month, Year, Mid Month, Customer Name,
+Product Name, Quantity, Free Quantity, Rate, B.Amount and Amount.
 
 | # | Rule | Where it is done |
 |---|---|---|
 | 1 | Distributor Name is always Gunjeshwari | the distributor chosen on Convert |
-| 2 | Invoice No is `INV - 1`, `INV - 2` … one per row, running across both PDFs | Invoice No = `INV - 1` sequence |
-| 3 | Uploaded on the 1st–10th: Month is the previous month, otherwise the current month, written in full (January, February …) | cut-off day 10 |
+| 2 | Invoice No is `INV - 1`, `INV - 2`, `INV - 3` … a new number for each row generated | Invoice No = `INV - 1` sequence |
+| 3 | Uploaded on the 1st–10th of the month: Month is the previous month (Month − 1), otherwise the current month, written in full (January, February, March …) | cut-off day 10 |
 | 4 | Year is the current year, YYYY | the month rule |
-| 5 | Uploaded on the 1st–10th: Mid Month is N, otherwise Y | cut-off day 10 |
-| 6 | Customer Name from the file | the PDF table |
-| 7 | Product Name from the file; a product carried on to further lines that start from the quantity gives one row per line, with the product repeated | fill-down in `parse.read_pdf` |
-| 8–10 | Quantity, Free Quantity and Rate from the file | Rate = **Read from the file** on Rules |
+| 5 | Uploaded on the 1st–10th of the current month: Mid Month is N, otherwise Y | cut-off day 10 |
+| 6 | Customer Name extracted from the file | the PDF table |
+| 7 | Product Name extracted from the file; where a product is repeated on a line that starts from the quantity, that line is entered as a new row with all its entries | fill-down in `parse.read_pdf` |
+| 8 | Quantity from the file | |
+| 9 | Free Quantity from the file | |
+| 10 | Rate from the file | Rate = **Read from the file** on Rules |
 | 11 | B.Amount and Amount are the same, read from the file | |
-| 12 | Product names replaced with the name on the product list where they match | **Reference names** on Convert |
-| 13 | Customer names replaced with the name on the customer list where they match | **Reference names** on Convert |
-| — | Special characters are ignored when matching names | `services/names.py` |
+| 12 | Product names replaced with the name in the product Excel sheet where they match | **Reference names** on Convert |
+| 13 | Customer names checked against the customer Excel sheet and replaced with the name in it where they match | **Reference names** on Convert |
+| — | All special characters are omitted when mapping product and customer names | `services/names.py` |
 
 ### Reference names
 
@@ -161,7 +166,7 @@ so the list can be completed.
   are lines labelled Total.
 
 A database from before this change is brought forward on startup: the pick
-pattern is set if empty, and the description and Rate-from-file are set only if
+pattern is set if empty or still the old Batch default, and the description and Rate-from-file are set only if
 Gunjeshwari's note was still a seeded default — anything typed on Rules stays.
 
 ## The rules, in one place
@@ -174,7 +179,7 @@ than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 93 tests (27 conversion + 7 PDF + 4 Yetichem + 11 Gunjeshwari + 9 Gunjeshwari hand-picked files + 30 master data + 5 legacy import)
+    cd backend && pytest -q        # 95 tests (27 conversion + 7 PDF + 4 Yetichem + 13 Gunjeshwari + 9 Gunjeshwari hand-picked files + 30 master data + 5 legacy import)
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real

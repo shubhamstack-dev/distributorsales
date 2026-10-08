@@ -178,7 +178,8 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
     """Open what was sent and say what is in it. Nothing is stored in the
     database yet: this is the screen where somebody chooses the right files.
     A zip is opened and the workbooks and PDFs inside it are listed; only the
-    files the distributor's rule names (for Gunjeshwari, the Batch PDF) are
+    files the distributor's rule names (for Gunjeshwari, ALI BATCHWISE*.pdf and
+    AHL BATCHWISE*.pdf, from one zip or from two zips sent together) are
     ticked. For a distributor in SELECT_ANY (Gunjeshwari) every file extracted
     from the zip is listed and can be ticked, whatever its name or type."""
     d = db.get(M.Distributor, distributor_id)
@@ -191,6 +192,7 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
 
     cap = config.MAX_UPLOAD_MB * 1024 * 1024
     books, refused, source_names = [], [], []
+    taken: set = set()          # one namespace for every file sent together
     total = 0
     for up in files:
         data = await up.read()
@@ -199,7 +201,8 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
             shutil.rmtree(folder, ignore_errors=True)
             raise HTTPException(413, f"More than {config.MAX_UPLOAD_MB} MB in one go.")
         source_names.append(up.filename or "upload")
-        found = parse.books_in(up.filename or "upload", data, everything=_any_file(d))
+        found = parse.books_in(up.filename or "upload", data, everything=_any_file(d),
+                               taken=taken)
         if not found:
             refused.append(up.filename or "upload")
         books.extend(found)

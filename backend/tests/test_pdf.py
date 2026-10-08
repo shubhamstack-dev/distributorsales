@@ -132,15 +132,18 @@ def test_a_broken_pdf_is_refused_not_crashed():
 
 
 # ===================================================== the rule and the screen
-def test_gunjeshwari_picks_the_batch_pdf(tok):
+def test_a_batch_pdf_not_named_ali_or_ahl_is_not_ticked_but_can_be_chosen(tok):
+    # The rule names ALI BATCHWISE*.pdf and AHL BATCHWISE*.pdf only, so another
+    # batch report is offered unticked - and is still read if ticked by hand.
     d = gunj(tok)
-    assert d["pick_pattern"] and "batch" in d["pick_pattern"].lower()
+    assert d["pick_pattern"] == seed.GUNJESHWARI_PICK
     r = ok(c.post("/api/uploads/inspect", headers=H(tok),
                   files=[("files", ("gunj.zip", ZIPPED, "application/zip"))],
                   data={"distributor_id": str(d["id"])}))
     by = {f["name"]: f for f in r["files"]}
     assert set(by) == {"Cover note.pdf", "Item Wise Summary.pdf", "Sales Batch Wise Report.pdf"}
-    assert [n for n, f in by.items() if f["suggested"]] == ["Sales Batch Wise Report.pdf"]
+    assert [n for n, f in by.items() if f["suggested"]] == []
+    assert by["Sales Batch Wise Report.pdf"]["selectable"]
     assert by["Sales Batch Wise Report.pdf"]["rows"] == 60
     assert by["Cover note.pdf"]["error"]
 
@@ -166,6 +169,12 @@ def test_an_old_database_is_brought_forward_but_a_typed_rule_is_kept():
         d = db.query(M.Distributor).filter_by(name="Gunjeshwari").one()
         keep = (d.pick_pattern, d.note)
         d.pick_pattern, d.note = None, seed._GUNJESHWARI_OLD_NOTE
+        db.commit()
+        seed.update_rules(db)
+        assert d.pick_pattern == seed.GUNJESHWARI_PICK and d.note == seed.GUNJESHWARI_NOTE
+
+        # the earlier seeded rule (any Batch PDF) is replaced by the new one
+        d.pick_pattern, d.note = seed._GUNJESHWARI_OLD_PICKS[0], seed._GUNJESHWARI_OLD_NOTES[2]
         db.commit()
         seed.update_rules(db)
         assert d.pick_pattern == seed.GUNJESHWARI_PICK and d.note == seed.GUNJESHWARI_NOTE

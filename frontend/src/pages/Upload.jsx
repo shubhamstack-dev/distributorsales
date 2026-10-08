@@ -170,9 +170,10 @@ export default function Upload() {
           <b>{dist ? 'Drop a .zip, or .xlsx or .pdf files, here — or choose them'
             : 'Choose a distributor above first'}</b>
           <span>A zip is opened and every workbook and PDF inside is listed for you to pick
-            from.{anyFile && ` For ${dist.name}, every file extracted from the zip is listed and
-            can be ticked, whatever its name or type; the PDF with Batch in its name is ticked to
-            begin with, and whichever files you tick are read under ${dist.name}'s rules.`}</span>
+            from.{anyFile && ` For ${dist.name}, drop both zips together: every file extracted from
+            them is listed and can be ticked, whatever its name or type; ALI BATCHWISE*.pdf and AHL
+            BATCHWISE*.pdf are ticked to begin with, and whichever files you tick are read under
+            ${dist.name}'s rules.`}</span>
           <input ref={pick} type="file" multiple hidden
                  accept={anyFile ? undefined : '.zip,.xlsx,.xls,.xlsm,.pdf'}
                  onChange={(e) => { send(e.target.files); e.target.value = '' }} />

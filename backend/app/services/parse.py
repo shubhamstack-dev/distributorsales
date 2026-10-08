@@ -86,7 +86,7 @@ def _unique(base: str, taken: set) -> str:
         i += 1
 
 
-def books_in(name: str, data: bytes, everything: bool = False):
+def books_in(name: str, data: bytes, everything: bool = False, taken: set | None = None):
     """Whatever was uploaded, reduced to the files this can read: a zip is
     opened, and the workbooks and PDFs inside it - or sent loose - are taken
     as they are. Anything else is left out.
@@ -94,8 +94,13 @@ def books_in(name: str, data: bytes, everything: bool = False):
     With everything=True (distributors whose files are chosen by hand under all
     conditions, e.g. Gunjeshwari) every file extracted from the zip is offered,
     whatever its type or name, and a zip inside the zip is opened too. Whether
-    a file can be read is then decided when it is read, not here."""
-    out, taken = [], set()
+    a file can be read is then decided when it is read, not here.
+
+    `taken` is shared across everything uploaded together, so two zips sent at
+    once (Gunjeshwari's ALI and AHL zips) that hold files with the same name
+    keep both: the second becomes 'name (2).pdf' rather than overwriting."""
+    out = []
+    taken = set() if taken is None else taken
 
     def take(inner_name: str, blob: bytes, depth: int):
         base = inner_name.split("/")[-1]
@@ -124,10 +129,10 @@ def books_in(name: str, data: bytes, everything: bool = False):
                         continue
                     take(info.filename, z.read(info), 1)
         except zipfile.BadZipFile:
-            return [(name.split("/")[-1], data)] if everything else []
+            return [(_unique(name.split("/")[-1], taken), data)] if everything else []
         return out
     if everything or readable(name):
-        return [(name.split("/")[-1], data)]
+        return [(_unique(name.split("/")[-1], taken), data)]
     return []
 
 
