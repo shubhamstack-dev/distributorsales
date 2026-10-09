@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from . import config, models as M, models_master  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
-from .routers import api, legacy, masters
+from .routers import api, master_upload, masters
 from .services import migrate, seed
 from .services.auth import read_token
 
@@ -42,8 +42,8 @@ def health():
 
 
 app.include_router(api.router)
+app.include_router(master_upload.router)      # before masters: /masters/upload is not a master
 app.include_router(masters.router)
-app.include_router(legacy.router)
 
 Base.metadata.create_all(engine)
 try:
@@ -60,6 +60,8 @@ try:
         for done in seed.update_rules(_db):
             print(f"[startup] {done}", flush=True)
         seed.ensure_masters(_db)
+        for done in seed.ensure_master_ids(_db):
+            print(f"[startup] {done}", flush=True)
     finally:
         _db.close()
 except Exception as e:                       # never stop the API booting over seeding

@@ -20,32 +20,32 @@ ADDED = {
         ("Phone", "VARCHAR(30) NULL"),
         ("Email", "VARCHAR(120) NULL"),
         ("RateMode", "VARCHAR(10) NOT NULL DEFAULT 'calc'"),
+        ("MidCutoffDay", "INT NULL"),
+        ("SalesSheet", "INT NULL"),
+        ("ReturnSheet", "INT NULL"),
+        ("ProductKeepDot", "INT NOT NULL DEFAULT 0"),
     ],
-    # legacy import (the old SQL Server data): its ids and the fields it kept
+    "batch": [("MidCutoffDay", "INT NULL")],
+    # the Master ID the Excel master tables point at
     **{t: [("LegacyId", "INT NULL")] for t in (
         "md_zone", "md_headquarter", "md_territory", "md_product_group",
         "md_designation", "md_role", "md_team")},
-    "md_brand": [("Nrv", "VARCHAR(20) NULL"), ("StartDate", "DATE NULL"),
-                 ("EndDate", "DATE NULL"), ("LegacyId", "INT NULL")],
-    "md_sku": [("SapProductId", "VARCHAR(25) NULL"), ("MaterialCode", "VARCHAR(50) NULL"),
-               ("Nrv", "VARCHAR(20) NULL"), ("StartDate", "DATE NULL"),
-               ("EndDate", "DATE NULL"), ("LegacyId", "INT NULL")],
-    "md_customer": [("SapId", "VARCHAR(50) NULL"), ("BillingName", "VARCHAR(200) NULL"),
-                    ("ZoneId", "INT NULL"), ("HeadquarterId", "INT NULL"),
-                    ("TerritoryId", "INT NULL"), ("SubTerritory", "VARCHAR(120) NULL"),
-                    ("State", "VARCHAR(80) NULL"), ("Remark", "VARCHAR(200) NULL"),
-                    ("StartDate", "DATE NULL"), ("EndDate", "DATE NULL"),
-                    ("LegacyId", "INT NULL")],
-    "md_employee": [("EndDate", "DATE NULL"), ("TerritoryCode", "VARCHAR(20) NULL"),
-                    ("RdCsEditable", "INT NOT NULL DEFAULT 0"), ("LegacyId", "INT NULL")],
 }
 # MySQL only: columns made wider after release -> (table, column, DDL, length)
-WIDEN = [("md_sku", "Name", "VARCHAR(250) NOT NULL", 250)]
+WIDEN = [("distributor", "Note", "VARCHAR(700) NULL", 700)]
 # MySQL only: foreign keys for columns added above (SQLite cannot add them later)
-FKS = [("distributor", "fk_dist_country", "CountryId", "md_country", "Id"),
-       ("md_customer", "fk_cust_zone", "ZoneId", "md_zone", "Id"),
-       ("md_customer", "fk_cust_hq", "HeadquarterId", "md_headquarter", "Id"),
-       ("md_customer", "fk_cust_territory", "TerritoryId", "md_territory", "Id")]
+FKS = [("distributor", "fk_dist_country", "CountryId", "md_country", "Id")]
+# The alignment tables pointed at md_customer / md_sku / md_employee before the
+# four tables of MASTER DATA & TABLES.xlsx replaced them. Those keys are dropped
+# so rows can point at CUSTOMER_MASTER / PRODUCT_MASTER / EMPLOYEE_MASTER. The
+# old md_customer, md_customer_alias, md_sku, md_sku_alias, md_brand and
+# md_employee tables are left in place, unused (see migrations/003).
+OLD_TARGETS = {"md_customer", "md_sku", "md_employee", "md_brand"}
+REPOINT = [("md_customer_assignment", "CustomerId", "CUSTOMER_MASTER", "CUSTOMER_ID"),
+           ("md_customer_assignment", "SkuId", "PRODUCT_MASTER", "PRODUCT_ID"),
+           ("md_employee_assignment", "EmployeeId", "EMPLOYEE_MASTER", "EMPLOYEE_ID"),
+           ("md_employee_assignment", "SkuId", "PRODUCT_MASTER", "PRODUCT_ID"),
+           ("md_product_reporting_sku", "SkuId", "PRODUCT_MASTER", "PRODUCT_ID")]
 
 
 def ensure_columns(engine: Engine) -> list[str]:
@@ -80,4 +80,25 @@ def ensure_columns(engine: Engine) -> list[str]:
                     cx.execute(text(f"ALTER TABLE {table} ADD CONSTRAINT {name} "
                                     f"FOREIGN KEY ({col}) REFERENCES {ref}({refcol})"))
                     done.append(f"{table}.{name}")
+            for table, col, ref, refcol in REPOINT:
+                if table not in tables:
+                    continue
+                fks = inspect(cx).get_foreign_keys(table)
+                for fk in fks:
+                    if fk.get("constrained_columns") == [col] and fk.get("referred_table") in OLD_TARGETS:
+                        cx.execute(text(f"ALTER TABLE {table} DROP FOREIGN KEY {fk['name']}"))
+                        done.append(f"{table}.{fk['name']} (pointed at {fk['referred_table']}) dropped")
+                fks = inspect(cx).get_foreign_keys(table)
+                if any(fk.get("constrained_columns") == [col] for fk in fks):
+                    continue
+                orphans = cx.execute(text(
+                    f"SELECT COUNT(*) FROM {table} t LEFT JOIN {ref} r ON r.{refcol} = t.{col} "
+                    f"WHERE r.{refcol} IS NULL")).scalar()
+                if orphans:
+                    done.append(f"{table}.{col}: {orphans} rows point at the old table, so no key "
+                                f"to {ref} was added; re-enter that alignment")
+                    continue
+                cx.execute(text(f"ALTER TABLE {table} ADD CONSTRAINT fk_{table[3:]}_{col.lower()} "
+                                f"FOREIGN KEY ({col}) REFERENCES {ref}({refcol})"))
+                done.append(f"{table}.{col} now points at {ref}")
     return done

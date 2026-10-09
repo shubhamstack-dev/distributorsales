@@ -9,6 +9,9 @@
     POST   /api/masters/{slug}/delete-many      remove several
     POST   /api/masters/{slug}/bulk             alignment: one row per SKU of a group
     POST   /api/masters/{slug}/copy-year        alignment: last year's rows into this year
+    POST   /api/masters/upload                  Excel/CSV into any master(s): check, then import
+    GET    /api/masters/{slug}/export           one master as .xlsx (also the upload template)
+    GET    /api/masters/export-all              every master, one sheet each
     GET    /api/currency/rate | /convert        INR <-> NPR on a date
 """
 from __future__ import annotations
@@ -23,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from .. import models_master as X
 from ..database import get_db
+from ..services import master_io
 from ..masters import specs as S
 from ..masters.specs import Spec, bad
 
@@ -41,6 +45,43 @@ def _maxlen(spec: Spec, name: str) -> int | None:
 
 def _has_active(spec: Spec) -> bool:
     return "active" in spec.model.__mapper__.attrs
+
+
+def _aliases_in(f: S.Field, raw) -> list[str]:
+    """Aliases arrive as a list or as text, one per line. Blank lines and
+    repeats (ignoring case) are dropped; the order is kept."""
+    items = raw if isinstance(raw, (list, tuple)) else str(raw or "").splitlines()
+    out, seen = [], set()
+    for a in items:
+        a = " ".join(str(a if a is not None else "").split())
+        if a and a.upper() != "NULL" and a.upper() not in seen:
+            seen.add(a.upper())
+            out.append(a)
+    if len(out) > f.count:
+        bad(f"At most {f.count} aliases fit ({len(out)} given). Drop the ones no longer used.")
+    return out
+
+
+def _alias_attrs(f: S.Field) -> list[str]:
+    return [f"alias_{i}" for i in range(1, f.count + 1)]
+
+
+def _set_aliases(spec: Spec, obj, f: S.Field, raw):
+    vals = _aliases_in(f, raw)
+    n = _maxlen(spec, "alias_1")
+    for v in vals:
+        if n and len(v) > n:
+            bad(f"An alias can be at most {n} characters: {v[:40]}…")
+    for i, attr in enumerate(_alias_attrs(f)):
+        setattr(obj, attr, vals[i] if i < len(vals) else None)
+
+
+def get_aliases(o, f: S.Field) -> list[str]:
+    return [v for v in (getattr(o, a) for a in _alias_attrs(f)) if v]
+
+
+def _key_col(target: Spec, f: S.Field):
+    return getattr(target.model, f.key) if f.key else target.model.id
 
 
 def _coerce(db: Session, spec: Spec, f: S.Field, raw):
@@ -71,8 +112,15 @@ def _coerce(db: Session, spec: Spec, f: S.Field, raw):
             return raw if isinstance(raw, date) else date.fromisoformat(str(raw)[:10])
         if f.type == "ref":
             rid = int(raw)
+            if f.soft:          # an id from the master tables, kept even if not (yet) here
+                return rid
             target = S.get(f.ref)
-            if not db.get(target.model, rid):
+            if f.key:
+                found = db.execute(select(target.model.id)
+                                   .where(_key_col(target, f) == rid)).first()
+            else:
+                found = db.get(target.model, rid)
+            if not found:
                 bad(f"The {f.label.lower()} chosen no longer exists.")
             return rid
     except HTTPException:
@@ -84,12 +132,34 @@ def _coerce(db: Session, spec: Spec, f: S.Field, raw):
 
 def _apply(db: Session, spec: Spec, obj, body: dict, creating: bool):
     for f in spec.fields:
-        if f.derived:
+        if f.derived or (f.create_only and not creating):
+            continue
+        if f.type == "aliases":
+            if f.name in body or creating:
+                _set_aliases(spec, obj, f, body.get(f.name))
             continue
         if f.name in body:
             setattr(obj, f.name, _coerce(db, spec, f, body[f.name]))
         elif creating:
-            setattr(obj, f.name, _coerce(db, spec, f, f.default))
+            d = f.default
+            if f.type == "ref" and isinstance(d, str):     # a natural key: country "IN"
+                d = master_io.natural_id(db, S.get(f.ref), d)
+            setattr(obj, f.name, _coerce(db, spec, f, d))
+    if creating and f_named(spec, "id") and getattr(obj, "id", None) is not None:
+        if db.get(spec.model, obj.id):
+            bad(f"{f_named(spec, 'id').label} {obj.id} is already taken. Leave it blank for the "
+                f"next free number, or edit that row.", 409)
+    if spec.master_id and getattr(obj, "legacy_id", None) is None:
+        obj.legacy_id = next_master_id(db, spec)
+
+
+def f_named(spec: Spec, name: str):
+    return next((f for f in spec.fields if f.name == name), None)
+
+
+def next_master_id(db: Session, spec: Spec) -> int:
+    top = db.execute(select(func.max(spec.model.legacy_id))).scalar()
+    return int(top or 0) + 1
 
 
 def _check_unique(db: Session, spec: Spec, obj):
@@ -133,15 +203,19 @@ def _labels(db: Session, spec: Spec, rows) -> dict[str, dict[int, str]]:
             continue
         ids = {getattr(r, f.name) for r in rows} - {None}
         target = S.get(f.ref)
-        found = db.execute(select(target.model).where(target.model.id.in_(ids))).scalars() \
+        col = _key_col(target, f)
+        found = db.execute(select(target.model).where(col.in_(ids))).scalars() \
             if ids else []
-        out[f.name] = {t.id: target.label(t) for t in found}
+        out[f.name] = {getattr(t, f.key or "id"): target.label(t) for t in found}
     return out
 
 
 def _out(spec: Spec, o, labels) -> dict:
     d = {"id": o.id}
     for f in spec.fields:
+        if f.type == "aliases":
+            d[f.name] = get_aliases(o, f)
+            continue
         v = getattr(o, f.name)
         if isinstance(v, Decimal):
             v = float(v)
@@ -150,6 +224,8 @@ def _out(spec: Spec, o, labels) -> dict:
         d[f.name] = v
         if f.type == "ref":
             d[f.name + "__label"] = labels.get(f.name, {}).get(v) if v is not None else None
+            if v is not None and d[f.name + "__label"] is None and f.soft:
+                d[f.name + "__label"] = f"{v} (not in {S.get(f.ref).title})"
     if _has_active(spec) and "active" not in d:
         d["active"] = o.active
     d["__label"] = spec.label(o)
@@ -184,11 +260,18 @@ def _ordered(spec: Spec, sel):
 def _references(db: Session, slug: str, rid: int) -> list[str]:
     """What still points at this row, in words."""
     found = []
+    target = S.get(slug)
+    obj = db.get(target.model, rid)
     for s in S.SPECS:
         for f in s.fields:
             if f.type == "ref" and f.ref == slug:
-                n = db.execute(select(func.count()).select_from(s.model)
-                               .where(_col(s, f.name) == rid)).scalar()
+                val = getattr(obj, f.key) if (f.key and obj is not None) else rid
+                if val is None:
+                    continue
+                q = select(func.count()).select_from(s.model).where(_col(s, f.name) == val)
+                if s is target:
+                    q = q.where(s.model.id != rid)        # a row naming itself
+                n = db.execute(q).scalar()
                 if n:
                     found.append(f"{n} in {s.title}")
     for model, attr, what in S.get(slug).extra_refs:
@@ -207,19 +290,26 @@ def meta():
 
 @router.get("/masters/{slug}/options")
 def options(slug: str, request: Request, q: str | None = None, limit: int = 500,
-            include_inactive: bool = False, db: Session = Depends(get_db)):
+            include_inactive: bool = False, key: str | None = None,
+            db: Session = Depends(get_db)):
+    """id + label for a drop-down. With key=legacy_id the id given back is the
+    row's Master ID, which is what the Excel tables store."""
     spec = S.get(slug)
     sel = select(spec.model)
+    if key:
+        if key not in ("legacy_id",) or not spec.master_id:
+            bad("That list cannot be keyed that way.")
+        sel = sel.where(spec.model.legacy_id.is_not(None))
     if _has_active(spec) and not include_inactive:
         sel = sel.where(spec.model.active == 1)
     params = {k: v for k, v in request.query_params.items()
-              if k not in ("q", "limit", "include_inactive")}
+              if k not in ("q", "limit", "include_inactive", "key")}
     sel = _filtered(spec, sel, params)
     if q and spec.search:
         like = f"%{q.strip()}%"
         sel = sel.where(or_(*[_col(spec, c).like(like) for c in spec.search]))
     rows = db.execute(_ordered(spec, sel).limit(max(1, min(limit, 2000)))).scalars().all()
-    return [{"id": r.id, "label": spec.label(r)} for r in rows]
+    return [{"id": getattr(r, key) if key else r.id, "label": spec.label(r)} for r in rows]
 
 
 @router.get("/masters/{slug}")
@@ -313,15 +403,16 @@ def bulk(slug: str, body: dict = Body(...), db: Session = Depends(get_db)):
     pg = body.get("product_group_id")
     if not pg:
         bad("Choose a product group.")
-    sel = select(X.Sku.id).join(X.Brand, X.Brand.id == X.Sku.brand_id) \
-        .where(X.Brand.product_group_id == int(pg), X.Sku.active == 1)
+    P = X.ProductMaster
+    sel = S._sku_by_group(select(P.id), pg).where(P.active == 1)
     if body.get("brand_id"):
-        sel = sel.where(X.Sku.brand_id == int(body["brand_id"]))
+        sel = sel.where(P.product_brand_id == int(body["brand_id"]))
     if body.get("sku_ids"):
-        sel = sel.where(X.Sku.id.in_([int(i) for i in body["sku_ids"]]))
-    skus = db.execute(sel.order_by(X.Sku.code)).scalars().all()
+        sel = sel.where(P.id.in_([int(i) for i in body["sku_ids"]]))
+    skus = db.execute(sel.order_by(P.sap_product_name)).scalars().all()
     if not skus:
-        bad("That product group has no active SKUs to assign.")
+        bad("That product group has no active products to assign. A product belongs to the "
+            "group whose Master ID is its PRODUCT_GROUP_ID.")
     created = skipped = 0
     try:
         for sid in skus:

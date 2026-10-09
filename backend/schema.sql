@@ -1,42 +1,49 @@
 -- Distributor sales. The API creates these on startup; this file is here so the
 -- schema can be read, reviewed and applied by hand if you would rather.
 CREATE TABLE IF NOT EXISTS distributor (
-  Id INT AUTO_INCREMENT PRIMARY KEY,
-  Name VARCHAR(60) NOT NULL UNIQUE,
-  CutoffDay INT NOT NULL DEFAULT 15,
-  InvoiceMode VARCHAR(10) NOT NULL DEFAULT 'seq',   -- seq | file
-  NegateReturns TINYINT NOT NULL DEFAULT 1,
-  PickPattern VARCHAR(200) NULL,                    -- names the files this rule wants
-  RateMode VARCHAR(10) NOT NULL DEFAULT 'calc',     -- calc (Amount / Quantity) | file
-  Note VARCHAR(500) NULL,
-  Active TINYINT NOT NULL DEFAULT 1,
-  -- master details; the CountryId foreign key is added in schema_masters.sql
-  Code VARCHAR(20) NULL,
-  CountryId INT NULL,
-  ContactPerson VARCHAR(120) NULL,
-  Phone VARCHAR(30) NULL,
-  Email VARCHAR(120) NULL
+	`Id` INTEGER NOT NULL AUTO_INCREMENT, 
+	`Name` VARCHAR(60) NOT NULL, 
+	`CutoffDay` INTEGER NOT NULL, 
+	`InvoiceMode` VARCHAR(10) NOT NULL, 
+	`NegateReturns` INTEGER NOT NULL, 
+	`PickPattern` VARCHAR(200), 
+	`RateMode` VARCHAR(10) NOT NULL, 
+	`MidCutoffDay` INTEGER, 
+	`SalesSheet` INTEGER, 
+	`ReturnSheet` INTEGER, 
+	`ProductKeepDot` INTEGER NOT NULL, 
+	`Note` VARCHAR(700), 
+	`Active` INTEGER NOT NULL, 
+	`Code` VARCHAR(20), 
+	`CountryId` INTEGER, 
+	`ContactPerson` VARCHAR(120), 
+	`Phone` VARCHAR(30), 
+	`Email` VARCHAR(120), 
+	PRIMARY KEY (`Id`), 
+	UNIQUE (`Name`), 
+	FOREIGN KEY(`CountryId`) REFERENCES md_country (`Id`)
 );
 
 CREATE TABLE IF NOT EXISTS batch (
-  Id INT AUTO_INCREMENT PRIMARY KEY,
-  DistributorId INT NOT NULL,
-  SourceName VARCHAR(255) NOT NULL DEFAULT '',
-  AsOf DATE NOT NULL,
-  MonthName VARCHAR(12) NOT NULL,
-  Year INT NOT NULL,
-  MidMonth CHAR(1) NOT NULL,
-  CutoffDay INT NOT NULL,
-  InvoiceMode VARCHAR(10) NOT NULL,
-  RowCount INT NOT NULL DEFAULT 0,
-  OmittedCount INT NOT NULL DEFAULT 0,
-  TotalQty DECIMAL(18,3) NOT NULL DEFAULT 0,
-  TotalAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
-  CreatedBy VARCHAR(120) NOT NULL DEFAULT '',
-  CreatedAtUtc DATETIME NOT NULL,
-  Notes TEXT NULL,
-  INDEX ix_batch_dist (DistributorId, CreatedAtUtc),
-  CONSTRAINT fk_batch_dist FOREIGN KEY (DistributorId) REFERENCES distributor(Id)
+	`Id` INTEGER NOT NULL AUTO_INCREMENT, 
+	`DistributorId` INTEGER NOT NULL, 
+	`SourceName` VARCHAR(255) NOT NULL, 
+	`AsOf` DATE NOT NULL, 
+	`MonthName` VARCHAR(12) NOT NULL, 
+	`Year` INTEGER NOT NULL, 
+	`MidMonth` VARCHAR(1) NOT NULL, 
+	`CutoffDay` INTEGER NOT NULL, 
+	`MidCutoffDay` INTEGER, 
+	`InvoiceMode` VARCHAR(10) NOT NULL, 
+	`RowCount` INTEGER NOT NULL, 
+	`OmittedCount` INTEGER NOT NULL, 
+	`TotalQty` NUMERIC(18, 3) NOT NULL, 
+	`TotalAmount` NUMERIC(18, 2) NOT NULL, 
+	`CreatedBy` VARCHAR(120) NOT NULL, 
+	`CreatedAtUtc` DATETIME NOT NULL, 
+	`Notes` TEXT, 
+	PRIMARY KEY (`Id`), 
+	FOREIGN KEY(`DistributorId`) REFERENCES distributor (`Id`)
 );
 
 -- Every workbook that was offered, used or not: when a total looks wrong the

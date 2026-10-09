@@ -23,8 +23,8 @@ export default function Batches() {
             {rows.map((b) => (
               <tr key={b.id}>
                 <td className="mono">{b.id}</td>
-                <td><b>{b.distributor}</b></td>
-                <td>{b.month} {b.year} <span className="chip mute">Mid {b.mid_month}</span></td>
+                <td><Link to={`/batches/${b.id}`}><b>{b.distributor}</b></Link></td>
+                <td>{b.month} {b.year} <span className={`chip ${b.mid_month === 'Y' ? 'warn' : 'mute'}`}>Mid {b.mid_month}</span></td>
                 <td className="mono">{b.as_of}</td>
                 <td className="r mono">{b.rows}</td>
                 <td className="r mono">{b.total_qty.toLocaleString('en-IN')}</td>
@@ -33,7 +33,7 @@ export default function Batches() {
                 <td><Link className="btn sm" to={`/batches/${b.id}`}>Open</Link></td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={9} className="empty">Nothing converted yet.</td></tr>}
+            {!rows.length && <tr><td colSpan={9} className="empty">Nothing converted yet. <Link to="/">Convert a distributor's files</Link>.</td></tr>}
           </tbody>
         </table>
       </div>

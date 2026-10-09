@@ -252,5 +252,5 @@ def test_two_zips_uploaded_together_are_combined(tok, gunj):
 
 
 def test_the_seeded_rule_is_the_new_one():
-    assert "ALI BATCHWISE" in seed.GUNJESHWARI_NOTE and "AHL BATCHWISE" in seed.GUNJESHWARI_NOTE
-    assert "Two zips" in seed.GUNJESHWARI_NOTE and len(seed.GUNJESHWARI_NOTE) <= 500
+    assert "BATCHWISE" in seed.GUNJESHWARI_NOTE and "ALI" in seed.GUNJESHWARI_NOTE
+    assert "Zips uploaded together" in seed.GUNJESHWARI_NOTE and len(seed.GUNJESHWARI_NOTE) <= 700

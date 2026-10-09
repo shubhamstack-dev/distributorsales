@@ -37,10 +37,15 @@ WANT = {
 }
 
 
-def clean(s) -> str:
+def clean(s, keep: str = "") -> str:
     """Drop special characters. Punctuation becomes a space rather than nothing,
-    so 'Rantoks Pharma Pvt.ltd.' reads 'Rantoks Pharma Pvt ltd', not 'Pvtltd'."""
-    return re.sub(r"\s+", " ", re.sub(r"[^A-Za-z0-9 ]+", " ", str(s if s is not None else ""))).strip()
+    so 'Rantoks Pharma Pvt.ltd.' reads 'Rantoks Pharma Pvt ltd', not 'Pvtltd'.
+
+    `keep` names characters that stay: Pharmachem's product names keep the
+    '.', so 'DUPHASTON 10MG TAB.' stays as it is and 'Pvt.ltd.' too."""
+    allowed = "A-Za-z0-9 " + re.escape(keep)
+    return re.sub(r"\s+", " ", re.sub(f"[^{allowed}]+", " ",
+                                      str(s if s is not None else ""))).strip()
 
 
 def _norm(s) -> str:
@@ -167,7 +172,7 @@ def _parse_cross_tab(rows, hr, out, stats):
                 stats["omitted"] += 1
                 continue
             amt = _num(amounts[c]) if c < len(amounts) else 0.0
-            out.append({"customer": clean(head[c]), "product": clean(prod),
+            out.append({"customer": clean(head[c]), "product": clean(prod), "product_raw": prod,
                         "qty": q, "free": f, "amount": amt, "invoice": None, "rate": None,
                         "is_return": False})
         r += 2                               # the amount row has been consumed
@@ -233,7 +238,7 @@ def _parse_row_wise(rows, hr, cmap, out, stats, is_return, negate, fill_down=Fal
             continue
         inv = get("invoice")
         rate = get("rate")
-        out.append({"customer": clean(cust), "product": clean(prod),
+        out.append({"customer": clean(cust), "product": clean(prod), "product_raw": prod,
                     "qty": q * sign, "free": f * sign, "amount": _num(get("amount")) * sign,
                     "invoice": str(inv).strip() if inv not in (None, "") else None,
                     # the rate is a price, so a return keeps it positive
@@ -329,7 +334,7 @@ def _challan_analysis(data: bytes, out, stats, is_return, negate):
         if q == 0 and f == 0:
             stats["omitted"] += 1
             continue
-        out.append({"customer": clean(cust), "product": clean(prod),
+        out.append({"customer": clean(cust), "product": clean(prod), "product_raw": prod,
                     "qty": q * sign, "free": f * sign, "amount": _num(t.group("amt")) * sign,
                     "invoice": challan or None, "rate": _num(t.group("rate")),
                     "is_return": bool(is_return)})
@@ -578,7 +583,7 @@ def _parse_loose(rows, out, stats, is_return, negate) -> str | None:
         amt = _tonum(get("amount")) if has_amt else 0.0
         if not amt and rate is not None:
             amt = round(q * rate, 2)      # no amount column: Quantity x Rate
-        out.append({"customer": clean(cust), "product": clean(prod),
+        out.append({"customer": clean(cust), "product": clean(prod), "product_raw": prod,
                     "qty": q * sign, "free": f * sign, "amount": amt * sign,
                     "invoice": None, "rate": rate, "is_return": bool(is_return)})
     return "rows, read loosely" if len(out) > before else None
@@ -674,7 +679,7 @@ def _pdf_text(data: bytes, out, stats, is_return, negate) -> str | None:
             continue
         rate = got.get("rate")
         amt = got.get("amount") or (round(q * rate, 2) if rate is not None else 0.0)
-        out.append({"customer": clean(party), "product": clean(product),
+        out.append({"customer": clean(party), "product": clean(product), "product_raw": product,
                     "qty": q * sign, "free": f * sign, "amount": amt * sign,
                     "invoice": None, "rate": rate, "is_return": bool(is_return)})
     return "text lines" if len(out) > before else None
@@ -809,13 +814,31 @@ def _pdf_rows_all(data: bytes):
 
 
 def read_book(name: str, data: bytes, negate_returns: bool = True,
-              any_file: bool = False) -> dict:
+              any_file: bool = False, sales_sheet: int | None = None,
+              return_sheet: int | None = None, keep_dot: bool = False) -> dict:
     """Every sales row in one workbook (or PDF report), with a note of how each
     sheet was read.
 
     any_file=True is for a file chosen by hand under all conditions: it is
     read whatever its name or type, and more loosely when the strict reading
-    finds nothing (see _read_any)."""
+    finds nothing (see _read_any).
+
+    sales_sheet / return_sheet (Pharmachem: 3 and 4) read only those sheets of
+    a workbook - the first as sales, the second as sales returns. keep_dot
+    keeps the '.' in product names when special characters are removed."""
+    r = _read_book(name, data, negate_returns, any_file, sales_sheet, return_sheet, keep_dot)
+    if keep_dot:
+        for x in r["rows"]:
+            if "product_raw" in x:
+                x["product"] = clean(x["product_raw"], keep=".")
+    for x in r["rows"]:
+        x.pop("product_raw", None)
+    return r
+
+
+def _read_book(name, data, negate_returns, any_file, sales_sheet, return_sheet, keep_dot):
+    if (sales_sheet or return_sheet) and not PDF.search(name) and _kind(name, data) == "book":
+        return read_register(name, data, sales_sheet, return_sheet, negate_returns)
     if any_file:
         return _read_any(name, data, negate_returns)
     if PDF.search(name):
@@ -841,5 +864,209 @@ def read_book(name: str, data: bytes, negate_returns: bool = True,
     error = None if out else (
         "No sales rows could be read. Expected either the cross-tab layout (Sn / Prodname / "
         "Unit) or a header row naming customer, product, quantity and amount.")
+    return {"name": name, "rows": out, "omitted": stats["omitted"], "sheets": sheets,
+            "error": error}
+
+
+# ====================================================================
+# Sheets chosen by position: Pharmachem's four workbooks
+#
+# Each workbook carries sales on sheet 3 and sales returns on sheet 4 (a sheet
+# named "Sheet3" / "Sheet 4" is taken first, otherwise the third and fourth
+# sheets in order). Each is a register: a header row, then one line per item
+# billed, the bill number and party often written only on a bill's first line.
+#
+#   Sheet 3 (sales):          Quantity, Free, B.Amount and Amount positive
+#   Sheet 4 (sales returns):  the same, negative
+#   Rate:                     read from the file; a price, so never negative
+# ====================================================================
+
+REG = {
+    "invoice": ("invoiceno", "invoicenumber", "invno", "invoice", "billno", "billnumber", "bill",
+                "voucherno", "vchno", "vno", "docno", "documentno", "challanno", "refno",
+                "returnno", "creditnoteno", "cnno", "salesreturnno", "invoiceid"),
+    "customer": LOOSE["customer"],
+    "product": LOOSE["product"],
+    "qty": ("quantity", "qty", "saleqty", "salesqty", "sqty", "billqty", "billedqty", "soldqty",
+            "salequantity", "salesquantity", "netqty", "returnqty", "retqty", "rqty", "qtysold",
+            "quantitysold", "units", "pcs", "nos"),
+    "free": LOOSE["free"] + ("freereturnqty", "retfree", "returnfree"),
+    "rate": ("rate", "salerate", "salesrate", "unitrate", "ptr", "pts", "netrate", "billrate",
+             "srate", "price", "unitprice"),
+    "bamount": ("bamount", "bamt", "basicamount", "basicamt", "basic", "basicvalue", "grossamount",
+                "grossamt", "gross", "grossvalue", "goodsvalue", "taxablevalue", "taxableamount",
+                "taxable", "amountbeforetax"),
+    "amount": ("amount", "amt", "netamount", "netamt", "net", "netvalue", "value", "totalamount",
+               "billamount", "invoiceamount", "finalamount", "nettotal", "total", "saleamount",
+               "salesamount", "salevalue", "salesvalue", "returnamount", "retamount"),
+    "_skip": ("srno", "sno", "slno", "date", "invdate", "invoicedate", "billdate", "batch", "batchno", "exp", "expiry",
+              "expdate", "mrp", "pack", "packing", "unit", "sn", "hsn", "hsncode",
+              "gst", "gstpercent", "cgst", "sgst", "igst", "tax", "disc", "discount", "cd", "td"),
+}
+_TOTALS = re.compile(r"^(grand|sub|net|bill|invoice|party|page)?total", re.I)
+
+
+def _reg_header(rows):
+    """The first row in the top 40 naming a product and a quantity column. Each
+    key takes the column whose header is earliest in its word list, so with
+    both 'Rate' and 'PTR' on the row, Rate is read."""
+    for r in range(min(len(rows), 40)):
+        cells = [_norm(c) for c in (rows[r] or [])]
+        best = {}
+        for i, c in enumerate(cells):
+            if not c:
+                continue
+            for key, words in REG.items():
+                if c in words:
+                    rank = words.index(c)
+                    if key not in best or rank < best[key][0]:
+                        best[key] = (rank, i)
+        for i, c in enumerate(cells):          # 'Sale Qty (Strips)', 'Party Name & Address'
+            if not c or any(i == v[1] for v in best.values()):
+                continue
+            for key, words in REG.items():
+                if key in best:
+                    continue
+                if any(len(w) >= 4 and c.startswith(w) for w in words):
+                    best[key] = (99, i)
+                    break
+        cmap = {k: v[1] for k, v in best.items() if k != "_skip"}
+        if "qty" in cmap and "product" in cmap:
+            return r, cmap
+    return None
+
+
+def _text(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return re.sub(r"\s+", " ", str(v)).strip()
+
+
+def _is_total(v) -> bool:
+    n = _norm(v)
+    return bool(n) and len(n) <= 24 and bool(_TOTALS.match(n))
+
+
+def _parse_register(rows, out, stats, is_return, negate, label):
+    found = _reg_header(rows)
+    if not found:
+        return None
+    hr, cmap = found
+    head = [_norm(c) for c in rows[hr]]
+    sign = -1 if (is_return and negate) else 1
+    last = {"invoice": "", "customer": "", "product": ""}
+    before = len(out)
+    for row in rows[hr + 1:]:
+        row = list(row or [])
+        if [_norm(c) for c in row] == head:              # header again, next page
+            continue
+
+        def get(k):
+            return row[cmap[k]] if k in cmap and cmap[k] < len(row) else None
+
+        inv, cust, prod = _text(get("invoice")), _text(get("customer")), _text(get("product"))
+        if _is_total(inv) or _is_total(cust) or _norm(prod) in ("total", "grandtotal", "subtotal") \
+                or (row and _is_total(row[0]) and not prod):
+            continue
+        qcell = get("qty")
+        m = QTY.match(_text(qcell))
+        has_qty = bool(m) or _isnum(qcell)
+        if not has_qty and not _isnum(get("amount")) and not _isnum(get("bamount")):
+            # a heading: the bill number or party the lines below belong to
+            if inv:
+                last["invoice"] = inv
+            if cust:
+                last["customer"] = _LABEL.sub("", cust).strip()
+            if not inv and not cust:
+                text = _heading_text(row)
+                bill = re.search(r"(?:bill|invoice|inv|voucher|vch)\s*(?:no|number)?\.?\s*[:\-]\s*(\S+)",
+                                 text, re.I)
+                if bill:
+                    last["invoice"] = bill.group(1)
+                elif text and re.search(r"[A-Za-z]", text) and not _NOT_A_NAME.search(text) \
+                        and "customer" not in cmap:
+                    last["customer"] = text
+            continue
+        if not has_qty:
+            continue
+        invoice = inv or last["invoice"]
+        customer = cust or last["customer"]
+        if not prod:
+            # a line with figures and a rate but no product carries on the one above
+            if not (last["product"] and _isnum(get("rate"))):
+                stats["omitted"] += 1
+                continue
+            prod = last["product"]
+        last.update(invoice=invoice, customer=customer, product=prod)
+        if m:
+            q, f = _num(m.group(1)), _num(m.group(2))
+        else:
+            q, f = _tonum(qcell), (_tonum(get("free")) if _isnum(get("free")) else 0.0)
+        if q == 0 and f == 0:
+            stats["omitted"] += 1
+            continue
+        rate = abs(_tonum(get("rate"))) if _isnum(get("rate")) else None
+        amt = _tonum(get("amount")) if _isnum(get("amount")) else None
+        bamt = _tonum(get("bamount")) if _isnum(get("bamount")) else None
+        if amt is None and bamt is None and rate is not None:
+            amt = round(abs(q) * rate, 2)
+        if amt is None:
+            amt = bamt
+        if bamt is None:
+            bamt = amt
+        # sales are positive and returns negative, as the rule says, whatever
+        # sign the file printed them with
+        out.append({"customer": clean(customer), "product": clean(prod), "product_raw": prod,
+                    "qty": abs(q) * sign, "free": abs(f) * sign,
+                    "amount": abs(amt or 0.0) * sign, "b_amount": abs(bamt or 0.0) * sign,
+                    "invoice": invoice or None, "rate": rate, "is_return": bool(is_return)})
+    return ("register (sales return)" if is_return else "register (sales)") \
+        if len(out) > before else None
+
+
+def _nth_sheet(book, n):
+    """Sheet n: one named 'Sheet<n>' (any spacing or case) if there is one,
+    otherwise the n-th sheet in the workbook."""
+    for title, rows in book:
+        if _norm(title) == "sheet" and re.sub(r"\D", "", str(title)) == str(n):
+            return title, rows
+    if 1 <= n <= len(book):
+        return book[n - 1]
+    return None
+
+
+def read_register(name: str, data: bytes, sales_sheet: int | None, return_sheet: int | None,
+                  negate: bool = True) -> dict:
+    try:
+        book = _sheets(data)
+    except Exception as e:
+        return {"name": name, "rows": [], "omitted": 0, "sheets": [],
+                "error": f"Not a workbook this can open: {type(e).__name__}"}
+    out, stats, sheets, missing = [], {"omitted": 0}, [], []
+    for n, is_ret in ((sales_sheet, False), (return_sheet, True)):
+        if not n:
+            continue
+        role = "sales returns" if is_ret else "sales"
+        got = _nth_sheet(book, n)
+        if got is None:
+            missing.append(f"sheet {n} ({role}): the workbook has {len(book)} sheet"
+                           f"{'s' if len(book) != 1 else ''}")
+            continue
+        title, rows = got
+        before, ob = len(out), stats["omitted"]
+        how = _parse_register(rows, out, stats, is_ret, negate, title)
+        sheets.append({"name": f"sheet {n} '{title}' ({role})",
+                       "layout": how or ("empty" if not any(rows) else None),
+                       "rows": len(out) - before, "omitted": stats["omitted"] - ob})
+    error = None
+    if not out:
+        error = ("No sales rows on " + " or ".join(
+            f"sheet {n}" for n in (sales_sheet, return_sheet) if n) +
+            ". Each needs a header row naming at least the product (or item) and the quantity."
+            + (" Missing: " + "; ".join(missing) + "." if missing else ""))
+    elif missing:
+        sheets.append({"name": "; ".join(missing), "layout": None, "rows": 0, "omitted": 0})
     return {"name": name, "rows": out, "omitted": stats["omitted"], "sheets": sheets,
             "error": error}

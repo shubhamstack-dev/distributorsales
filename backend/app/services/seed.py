@@ -65,25 +65,45 @@ _YETICHEM_OLD_NOTES = (
     "Cross-tab workbooks. The three PW files are picked out of the zip automatically; "
     "Total columns and Total rows are subtotals and are left out.",)
 
+# Pharmachem's rule, as given. A zip of four Excel files; every workbook in it is
+# picked and combined into one sheet. In each workbook sheet 3 is sales and
+# sheet 4 is sales returns (negated). Month steps back on the 1st-10th; Mid
+# Month is N on the 1st-11th - the two days differ in the rule and are kept
+# apart. Customer names lose every special character, product names every one
+# but the '.'.
+PHARMACHEM_PICK = r"\.(xlsx|xlsm|xls)$"
+PHARMACHEM_NOTE = ("Zip of four Excel files: every workbook is picked and combined into one sheet. "
+                   "Sheet 3 of each is read as sales, sheet 4 as sales returns (quantity, free, "
+                   "B.Amount and Amount negative). Invoice No, Customer, Product, Quantity, Free, "
+                   "Rate, B.Amount and Amount from the file. Month: 1st-10th = previous month. "
+                   "Mid Month: 1st-11th = N, else Y. Special characters removed from names; "
+                   "product names keep the '.'.")
+_PHARMACHEM_OLD_NOTES = (
+    "Row-wise invoice sheets. Invoice numbers come from the file, and a SALES RETURN sheet "
+    "has its quantities and amounts negated.",)
+PHARMACHEM = dict(cutoff_day=10, mid_cutoff_day=11, invoice_mode="file", rate_mode="file",
+                  negate_returns=1, pick_pattern=PHARMACHEM_PICK, sales_sheet=3,
+                  return_sheet=4, product_keep_dot=1, note=PHARMACHEM_NOTE)
+
 SEED = [
-    ("Yetichem", 15, "seq", 1, r"PW\.(xlsx|xlsm|xls)$", YETICHEM_NOTE),
-    ("Pharmachem", 10, "file", 1, None,
-     "Row-wise invoice sheets. Invoice numbers come from the file, and a SALES RETURN sheet "
-     "has its quantities and amounts negated."),
-    ("Gunjeshwari", 10, "seq", 1, GUNJESHWARI_PICK, GUNJESHWARI_NOTE),
+    dict(name="Yetichem", cutoff_day=15, invoice_mode="seq", negate_returns=1,
+         pick_pattern=r"PW\.(xlsx|xlsm|xls)$", note=YETICHEM_NOTE),
+    dict(name="Pharmachem", **PHARMACHEM),
+    dict(name="Gunjeshwari", cutoff_day=10, invoice_mode="seq", negate_returns=1,
+         pick_pattern=GUNJESHWARI_PICK, note=GUNJESHWARI_NOTE),
 ]
 
 
 def ensure(db: Session) -> None:
     """Add any distributor that is missing. Never edits one that is there, so a
     cut-off corrected on screen is not undone by the next restart."""
-    for name, cut, mode, neg, pick, note in SEED:
+    for d in SEED:
         if db.execute(select(M.Distributor)
-                      .where(M.Distributor.name == name)).scalar_one_or_none():
+                      .where(M.Distributor.name == d["name"])).scalar_one_or_none():
             continue
-        db.add(M.Distributor(name=name, cutoff_day=cut, invoice_mode=mode,
-                             negate_returns=neg, pick_pattern=pick, note=note,
-                             rate_mode="file" if name in RATE_FROM_FILE else "calc"))
+        row = dict(d)
+        row.setdefault("rate_mode", "file" if d["name"] in RATE_FROM_FILE else "calc")
+        db.add(M.Distributor(**row))
     db.commit()
 
 
@@ -109,6 +129,13 @@ def update_rules(db: Session) -> list[str]:
             d.note = GUNJESHWARI_NOTE
             d.rate_mode = "file"
             done.append("Gunjeshwari's rule replaced with the current one (Rate from the file)")
+    p = db.execute(select(M.Distributor)
+                   .where(M.Distributor.name == "Pharmachem")).scalar_one_or_none()
+    if p is not None and (p.note in _PHARMACHEM_OLD_NOTES or p.note is None):
+        for k, v in PHARMACHEM.items():
+            setattr(p, k, v)
+        done.append("Pharmachem's rule replaced with the current one (sheet 3 sales, sheet 4 "
+                    "returns, Mid Month cut-off 11th)")
     db.commit()
     return done
 
@@ -118,6 +145,31 @@ def update_rules(db: Session) -> list[str]:
 # seeded as a starting point and is edited on the Currency rates screen.
 COUNTRIES = [("IN", "India", "INR"), ("NP", "Nepal", "NPR")]
 RATE = ("INR", "NPR", 1.6, date(2000, 1, 1), "Official peg; confirm before relying on it")
+
+
+MASTER_ID_SPECS = (X.Zone, X.Headquarter, X.Territory, X.ProductGroup, X.Designation, X.Role,
+                   X.Team)
+
+
+def ensure_master_ids(db: Session) -> list[str]:
+    """Every zone, HQ, territory, product group, designation, role and team
+    gets a Master ID - the number the Excel master tables point at. Rows that
+    have one keep it; rows added before Master IDs existed get the next free
+    numbers, in the order they were added."""
+    from sqlalchemy import func
+    done = []
+    for model in MASTER_ID_SPECS:
+        missing = db.execute(select(model).where(model.legacy_id.is_(None))
+                             .order_by(model.id)).scalars().all()
+        if not missing:
+            continue
+        top = db.execute(select(func.max(model.legacy_id))).scalar() or 0
+        for o in missing:
+            top += 1
+            o.legacy_id = top
+        done.append(f"{len(missing)} {model.__tablename__} rows given a Master ID")
+    db.commit()
+    return done
 
 
 def ensure_masters(db: Session) -> None:

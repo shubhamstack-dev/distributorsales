@@ -41,21 +41,23 @@ def world(h):
     w["terr2"] = add(h, "territory", code="PKR-1", name="Pokhara 1", headquarter_id=w["hq2"]["id"])
     w["pg"] = add(h, "product_group", code="CARD", name="Cardio", company_id=w["co"]["id"])
     w["pg2"] = add(h, "product_group", code="GAST", name="Gastro")
-    w["br"] = add(h, "brand", code="ATOR", name="Atorva", product_group_id=w["pg"]["id"])
-    w["br2"] = add(h, "brand", code="PANT", name="Panto", product_group_id=w["pg2"]["id"])
-    w["sku1"] = add(h, "sku", code="ATOR10", name="Atorva 10", brand_id=w["br"]["id"])
-    w["sku2"] = add(h, "sku", code="ATOR20", name="Atorva 20", brand_id=w["br"]["id"])
-    w["sku3"] = add(h, "sku", code="PANT40", name="Panto 40", brand_id=w["br2"]["id"])
+    # brands and products point at a group's Master ID, as the Excel tables do
+    w["br"] = add(h, "brand", product_brand_name="ATORVA", product_group_id=w["pg"]["legacy_id"])
+    w["br2"] = add(h, "brand", product_brand_name="PANTO", product_group_id=w["pg2"]["legacy_id"])
+    w["sku1"] = add(h, "sku", sap_product_name="ATORVA 10", product_brand_id=w["br"]["id"],
+                    aliases="ATORVA-10 TAB\nATOR 10")
+    w["sku2"] = add(h, "sku", sap_product_name="ATORVA 20", product_brand_id=w["br"]["id"])
+    w["sku3"] = add(h, "sku", sap_product_name="PANTO 40", product_brand_id=w["br2"]["id"])
     w["team"] = add(h, "team", code="T-CV", name="Cardio team")
     w["des"] = add(h, "designation", code="MR", name="Medical Rep", level=1)
     w["des2"] = add(h, "designation", code="ABM", name="Area Manager", level=2)
     w["role"] = add(h, "role", code="FIELD", name="Field")
-    w["cust"] = add(h, "customer", code="c-001", name="City Chemist", classification="Chemist",
-                    country_id=np_["id"])
-    w["boss"] = add(h, "employee", code="E1", name="Asha", designation_id=w["des2"]["id"])
-    w["emp"] = add(h, "employee", code="E2", name="Bikash", designation_id=w["des"]["id"],
-                   team_id=w["team"]["id"], role_id=w["role"]["id"],
-                   headquarter_id=w["hq"]["id"], reports_to_id=w["boss"]["id"])
+    w["cust"] = add(h, "customer", customer_name="CITY CHEMIST", cust_classification_id=1,
+                    hq_id=w["hq"]["legacy_id"], aliases=["CITY CHEM KTM", "City Chemist"])
+    w["boss"] = add(h, "employee", employee_ft_nm="Asha", designation_id=w["des2"]["legacy_id"])
+    w["emp"] = add(h, "employee", employee_ft_nm="Bikash", designation_id=w["des"]["legacy_id"],
+                   team="Cardio team", role_id=w["role"]["legacy_id"],
+                   reporting_manager_id=w["boss"]["id"])
     add(h, "team_product_group", year_id=w["y26"]["id"], team_id=w["team"]["id"],
         product_group_id=w["pg"]["id"])
     add(h, "team_headquarter", year_id=w["y26"]["id"], team_id=w["team"]["id"],
@@ -75,7 +77,49 @@ def test_every_master_is_described(h):
 
 def test_labels_come_back_with_references(h, world):
     t = rows(h, "territory", q="KTM-1")["rows"][0]
-    assert t["headquarter_id__label"] == "KTM — Kathmandu"
+    assert t["headquarter_id__label"].endswith("KTM — Kathmandu")
+
+
+def test_the_alias_pages_are_gone_and_aliases_live_on_the_row(h, world):
+    slugs = {m["slug"] for m in ok(c.get("/api/masters/meta", headers=h))}
+    assert "customer_alias" not in slugs and "sku_alias" not in slugs
+    assert world["cust"]["aliases"] == ["CITY CHEM KTM", "City Chemist"]
+    assert world["sku1"]["aliases"] == ["ATORVA-10 TAB", "ATOR 10"]
+    # an alias is found by the search
+    assert rows(h, "sku", q="ATOR 10")["total"] == 1
+    # and kept in its own column, as in the workbook
+    from tests.harness import Testing
+    from app import models_master as X
+    s = Testing()
+    o = s.get(X.ProductMaster, world["sku1"]["id"])
+    assert (o.alias_1, o.alias_2, o.alias_3) == ("ATORVA-10 TAB", "ATOR 10", None)
+    s.close()
+
+
+def test_too_many_aliases_are_refused(h):
+    refused(c.post("/api/masters/customer", json={"customer_name": "X",
+                   "aliases": [f"A{i}" for i in range(51)]}, headers=h), 422, "At most 50")
+
+
+def test_master_ids_are_given_and_keyed_references_label(h, world):
+    assert world["zone"]["legacy_id"] is not None
+    assert world["hq"]["legacy_id"] != world["hq2"]["legacy_id"]
+    b = rows(h, "brand", q="ATORVA")["rows"][0]
+    assert b["product_group_id__label"].endswith("CARD — Cardio")
+    s = rows(h, "sku", q="PANTO")["rows"][0]
+    assert s["product_group_id"] == world["pg2"]["legacy_id"]        # taken from the brand
+    opts = ok(c.get("/api/masters/product_group/options", params={"key": "legacy_id"}, headers=h))
+    assert world["pg"]["legacy_id"] in [o["id"] for o in opts]
+
+
+def test_the_row_id_is_kept_and_cannot_be_changed(h):
+    x = add(h, "customer", id=777001, customer_name="ID KEPT")
+    assert x["id"] == 777001
+    y = ok(c.put("/api/masters/customer/777001", json={"id": 5, "customer_name": "ID KEPT 2"},
+                 headers=h))
+    assert y["id"] == 777001 and y["customer_name"] == "ID KEPT 2"
+    refused(c.post("/api/masters/customer", json={"id": 777001, "customer_name": "Z"}, headers=h),
+            409, "already taken")
 
 
 def test_codes_are_upper_case_and_unique_regardless_of_case(h, world):
@@ -88,13 +132,22 @@ def test_required_fields_are_required(h):
     refused(c.post("/api/masters/zone", json={"code": "X"}, headers=h), 422, "name is required")
 
 
-def test_a_reference_that_does_not_exist_is_refused(h):
-    refused(c.post("/api/masters/brand", json={"code": "B", "name": "B", "product_group_id": 99999},
+def test_a_reference_that_does_not_exist_is_refused(h, world):
+    refused(c.post("/api/masters/headquarter", json={"code": "B", "name": "B", "zone_id": 99999},
                    headers=h), 422, "no longer exists")
+
+
+def test_an_excel_table_id_may_point_ahead_of_its_parent(h):
+    """CUSTOMER_MASTER.ZONE_ID 12 before ZONE 12 is uploaded: kept, and labelled so."""
+    x = add(h, "customer", customer_name="AHEAD", zone_id=424242)
+    assert x["zone_id"] == 424242 and "not in Zones" in x["zone_id__label"]
 
 
 def test_something_in_use_cannot_be_deleted(h, world):
     refused(c.delete(f"/api/masters/zone/{world['zone']['id']}", headers=h), 409, "Headquarters")
+    # a product group named by a brand's PRODUCT_GROUP_ID is in use too
+    refused(c.delete(f"/api/masters/product_group/{world['pg']['id']}", headers=h), 409, "Brands")
+    refused(c.delete(f"/api/masters/brand/{world['br']['id']}", headers=h), 409, "Products")
 
 
 def test_delete_many_is_all_or_nothing(h, world):
@@ -170,7 +223,7 @@ def test_company_country_pairs_are_unique(h, world):
 def test_sku_options_narrow_to_a_product_group(h, world):
     opts = ok(c.get("/api/masters/sku/options", params={"product_group_id": world["pg"]["id"]},
                     headers=h))
-    assert sorted(o["label"].split(" ")[0] for o in opts) == ["ATOR10", "ATOR20"]
+    assert sorted(o["label"].split(" — ")[1] for o in opts) == ["ATORVA 10", "ATORVA 20"]
 
 
 def test_territories_narrow_to_a_zone(h, world):
@@ -195,7 +248,7 @@ def test_reporting_lines_carry_a_flag_and_one_line_per_sku_per_year(h, world):
 
 def test_an_employee_cannot_report_in_a_circle(h, world):
     refused(c.put(f"/api/masters/employee/{world['boss']['id']}",
-                  json={"reports_to_id": world["emp"]["id"]}, headers=h), 422, "circle")
+                  json={"reporting_manager_id": world["emp"]["id"]}, headers=h), 422, "circle")
 
 
 # =============================================================== alignment
@@ -228,7 +281,7 @@ def test_customer_alignment_in_bulk_by_product_group(h, world):
     r = ok(c.post("/api/masters/customer_assignment/bulk", json=body, headers=h))
     assert r == {"created": 0, "skipped": 2, "skus": 2}           # nothing twice
     got = rows(h, "customer_assignment", customer_id=world["cust"]["id"])
-    assert got["total"] == 2 and got["rows"][0]["sku_id__label"].startswith("ATOR")
+    assert got["total"] == 2 and "ATORVA" in got["rows"][0]["sku_id__label"]
 
 
 def test_employee_alignment_in_bulk(h, world):
@@ -283,4 +336,5 @@ def test_an_older_database_gets_the_new_distributor_columns():
     assert "distributor.CountryId" in ensure_columns(eng)
     assert ensure_columns(eng) == []                              # and only once
     cols = {x["name"] for x in inspect(eng).get_columns("distributor")}
-    assert {"Code", "CountryId", "ContactPerson", "Phone", "Email"} <= cols
+    assert {"Code", "CountryId", "ContactPerson", "Phone", "Email", "MidCutoffDay",
+            "SalesSheet", "ReturnSheet", "ProductKeepDot"} <= cols

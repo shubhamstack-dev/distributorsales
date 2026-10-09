@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { api } from '../../api.js'
 import MasterPage from './MasterPage.jsx'
-import LegacyImport from './LegacyImport.jsx'
+import MasterUpload from './MasterUpload.jsx'
 
 // The order the rail reads in: set up first, then structure, then alignment,
 // which leans on everything above it.
 const GROUPS = ['Setup', 'Geography', 'Products', 'Customers', 'People', 'Alignment']
 
-/** Every master screen, listed by what it is part of. The screens themselves
- *  are drawn from the server's description of each table (api /masters/meta),
- *  so a field or rule added on the server appears here without a code change. */
+/** Every master screen, listed by what it is part of. The screens are drawn
+ *  from the server's description of each table (api /masters/meta), so a field
+ *  added on the server appears here without a code change. */
 export default function Masters() {
   const [meta, setMeta] = useState(null)
   const [err, setErr] = useState('')
@@ -24,8 +24,11 @@ export default function Masters() {
   return (
     <div className="masters">
       <button className="btn sm rail-toggle" aria-expanded={open}
-              onClick={() => setOpen((o) => !o)}>{open ? 'Hide list' : 'All masters'}</button>
+              onClick={() => setOpen((o) => !o)}>{open ? 'Hide the list' : 'All masters'}</button>
       <nav className={`rail ${open ? 'open' : ''}`} aria-label="Masters">
+        <div className="rail-group">
+          <NavLink className="tool" to="/masters/upload" onClick={() => setOpen(false)}>Upload master data</NavLink>
+        </div>
         {GROUPS.map((g) => (
           <div key={g} className="rail-group">
             <div className="rail-head">{g}</div>
@@ -36,20 +39,16 @@ export default function Masters() {
             ))}
           </div>
         ))}
-        <div className="rail-group">
-          <div className="rail-head">Tools</div>
-          <NavLink to="/masters/import" onClick={() => setOpen(false)}>Import old data</NavLink>
-        </div>
       </nav>
       <section className="master-pane">
         <Routes>
-          <Route index element={<Navigate to="year" replace />} />
-          <Route path="import" element={<LegacyImport />} />
+          <Route index element={<Navigate to="upload" replace />} />
+          <Route path="upload" element={<MasterUpload meta={meta} />} />
           {meta.map((m) => (
             <Route key={m.slug} path={m.slug}
                    element={<MasterPage key={m.slug} spec={m} />} />
           ))}
-          <Route path="*" element={<Navigate to="year" replace />} />
+          <Route path="*" element={<Navigate to="upload" replace />} />
         </Routes>
       </section>
     </div>

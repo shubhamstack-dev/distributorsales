@@ -1,0 +1,22 @@
+-- 003: the four tables of MASTER DATA & TABLES.xlsx replace the old masters.
+--
+-- Nothing here has to be run by hand: on startup the API creates
+-- CUSTOMER_MASTER, EMPLOYEE_MASTER, PRODUCT_MASTER_BRAND and PRODUCT_MASTER
+-- (schema_masters.sql), adds the new distributor and batch columns, gives every
+-- zone / HQ / territory / product group / team / role / designation a Master ID,
+-- and repoints the alignment tables' keys at the new tables.
+--
+-- The old tables below are no longer used. They are left in place so nothing is
+-- lost without a decision; once the masters have been uploaded again from
+-- MASTER DATA & TABLES.xlsx (Masters > Upload master data) they can be dropped:
+--
+-- DROP TABLE md_customer_alias;
+-- DROP TABLE md_sku_alias;
+-- DROP TABLE md_customer;
+-- DROP TABLE md_sku;
+-- DROP TABLE md_brand;
+-- DROP TABLE md_employee;
+--
+-- Alignment rows (customer / employee alignment, product reporting > SKUs)
+-- made before this change point at the old ids. The startup log names any
+-- table where that is so; re-enter those rows against the new masters.

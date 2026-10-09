@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api.js'
 import RefSelect, { forgetOptions } from './RefSelect.jsx'
 import CurrencyTool from './CurrencyTool.jsx'
+import UploadReport from './UploadReport.jsx'
 
 const SIZE = 50
 
@@ -10,8 +11,8 @@ const SIZE = 50
 const PATHS = {
   zone: ['Country', 'Zone'], headquarter: ['Zone', 'Headquarter'],
   territory: ['Zone', 'Headquarter', 'Territory'],
-  product_group: ['Product group'], brand: ['Product group', 'Brand'],
-  sku: ['Product group', 'Brand', 'SKU'],
+  brand: ['Product group', 'Brand'], sku: ['Product group', 'Brand', 'Product'],
+  customer: ['Zone', 'HQ', 'Territory', 'Customer'],
   product_reporting_sku: ['Reporting line (P1 / P2 / X)', 'SKU'],
   customer_assignment: ['Year', 'Customer', 'Territory + Team', 'Product group', 'SKU'],
   employee_assignment: ['Year', 'Employee', 'Territory', 'Product group', 'SKU'],
@@ -19,7 +20,7 @@ const PATHS = {
 
 /** "Territories" -> "territory", "Team › Product groups" -> "product group", "SKUs" -> "SKU". */
 function singular(title) {
-  let t = title.split('› ').pop()
+  let t = title.split('› ').pop().replace(/\s*\(.*\)/, '')
   if (/ies$/.test(t)) t = t.replace(/ies$/, 'y')
   else if (/[^s]s$/.test(t)) t = t.slice(0, -1)
   return /^[A-Z]{2,}/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1)
@@ -32,15 +33,16 @@ function blankForm(spec, filters) {
   for (const f of editable(spec)) {
     if (f.type === 'bool') o[f.name] = f.default === null || f.default === undefined ? 0 : f.default
     else if (f.type === 'ref' && filters[f.name]) o[f.name] = Number(filters[f.name])
+    else if (f.type === 'ref' || f.type === 'aliases') o[f.name] = ''   // a ref default is resolved by the server
     else o[f.name] = f.default ?? ''
   }
   return o
 }
 
-function toBody(spec, form, skip = []) {
+function toBody(spec, form, skip = [], editing = false) {
   const b = {}
   for (const f of editable(spec)) {
-    if (skip.includes(f.name)) continue
+    if (skip.includes(f.name) || (editing && f.create_only)) continue
     const v = form[f.name]
     b[f.name] = v === '' || v === undefined ? null : v
   }
@@ -49,10 +51,15 @@ function toBody(spec, form, skip = []) {
 
 function Cell({ f, row }) {
   const v = row[f.name]
+  if (f.type === 'aliases') {
+    if (!v?.length) return <span className="faint">None</span>
+    return <span title={v.join('\n')}>{v[0]}{v.length > 1 && <span className="aliascount"> and {v.length - 1} more</span>}</span>
+  }
   if (f.type === 'ref') return v ? (row[`${f.name}__label`] || `#${v}`) : <span className="faint">—</span>
   if (f.type === 'bool') return v ? <span className="chip ok">Yes</span> : <span className="chip mute">No</span>
   if (f.name === 'flag') return <span className={`chip flag-${v}`}>{v === 'X' ? 'X · Others' : v}</span>
   if (v === null || v === undefined || v === '') return <span className="faint">—</span>
+  if (f.name === 'id') return <span className="num">{v}</span>
   if (f.type === 'decimal') return <span className="mono">{Number(v).toLocaleString('en-IN', { maximumFractionDigits: 6 })}</span>
   if (f.type === 'code' || f.type === 'date' || f.type === 'int') return <span className="mono">{v}</span>
   return String(v)
@@ -63,15 +70,33 @@ function Input({ f, form, set, spec, row }) {
   const id = `f-${f.name}`
   const v = form[f.name] ?? ''
   let control
+  if (f.type === 'aliases') {
+    const n = String(v).split('\n').filter((x) => x.trim()).length
+    return (
+      <label htmlFor={id} className="wide">
+        <span>{f.label} <span className="faint">({n} of {f.count})</span></span>
+        <textarea id={id} value={v} rows={6} placeholder="One name per line"
+                  onChange={(e) => set(f.name, e.target.value)} />
+        {f.help && <small className="fine">{f.help}</small>}
+      </label>
+    )
+  }
+  if (f.create_only && row) {
+    return (
+      <label htmlFor={id}><span>{f.label}</span>
+        <input id={id} value={v} readOnly className="num" />
+        <small className="fine">Set when the row was added; other tables point at it.</small></label>
+    )
+  }
   if (f.type === 'ref') {
     const n = f.narrow
     const from = n ? spec.fields.find((x) => x.name === n.from) : null
     control = (
       <RefSelect id={id} slug={f.ref} value={v || null} required={f.required}
-                 blank={f.required ? '— choose —' : '— none —'}
+                 blank={f.required ? 'Choose…' : 'None'}
                  params={n ? { [n.param]: form[n.from] } : {}}
                  waitingFor={n && !form[n.from] ? from?.label.toLowerCase() : null}
-                 currentLabel={row?.[`${f.name}__label`]}
+                 currentLabel={row?.[`${f.name}__label`]} keyBy={f.key}
                  onChange={(x) => set(f.name, x)} />
     )
   } else if (f.type === 'bool') {
@@ -84,7 +109,7 @@ function Input({ f, form, set, spec, row }) {
   } else if (f.type === 'select') {
     control = (
       <select id={id} value={v} required={f.required} onChange={(e) => set(f.name, e.target.value)}>
-        <option value="">— choose —</option>
+        <option value="">Choose…</option>
         {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     )
@@ -129,6 +154,9 @@ export default function MasterPage({ spec }) {
   const [form, setForm] = useState({})
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [upFiles, setUpFiles] = useState([])
+  const [report, setReport] = useState(null)
+  const filePick = useRef(null)
 
   // year-bound screens open on the current year, which is what people edit
   useEffect(() => {
@@ -157,12 +185,24 @@ export default function MasterPage({ spec }) {
   function openAdd() { setEditing(null); setForm(blankForm(spec, filters)); setMode('add'); setMsg(null) }
   function openEdit(row) {
     const f = {}
-    for (const x of editable(spec)) f[x.name] = row[x.name] ?? ''
+    for (const x of editable(spec)) {
+      f[x.name] = x.type === 'aliases' ? (row[x.name] || []).join('\n') : (row[x.name] ?? '')
+    }
     setEditing(row); setForm(f); setMode('edit'); setMsg(null)
   }
   function openBulk() { setForm(blankForm(spec, filters)); setMode('bulk'); setMsg(null) }
   function openCopy() { setForm({ to_year_id: filters.year_id || null }); setMode('copy'); setMsg(null) }
-  const close = () => { setMode(null); setEditing(null) }
+  const close = () => { setMode(null); setEditing(null); setReport(null) }
+
+  async function upload(dry, list = upFiles) {
+    if (!list.length) return
+    setBusy(true); setMsg(null)
+    try {
+      const r = await api.masterUpload(list, dry, spec.slug)
+      setReport(r); setMode('upload')
+      if (!dry) { setUpFiles([]); forgetOptions(); load() }
+    } catch (e) { say(e.message, true) } finally { setBusy(false) }
+  }
 
   async function run(fn) {
     setBusy(true); setMsg(null)
@@ -171,7 +211,7 @@ export default function MasterPage({ spec }) {
 
   const save = (e) => { e.preventDefault(); run(async () => {
     if (mode === 'edit') {
-      await api.masterUpdate(spec.slug, editing.id, toBody(spec, form))
+      await api.masterUpdate(spec.slug, editing.id, toBody(spec, form, [], true))
       forgetOptions(); close(); say('Changes saved.'); load()
     } else {
       const r = await api.masterCreate(spec.slug, toBody(spec, form))
@@ -223,6 +263,7 @@ export default function MasterPage({ spec }) {
       <div className="head">
         <div>
           <h1>{spec.title}</h1>
+          {spec.table === spec.table.toUpperCase() && <div className="tablename">Table {spec.table}</div>}
           {spec.description && <p className="lead">{spec.description}</p>}
           {path && (
             <ol className="path" aria-label="Where this sits">
@@ -242,7 +283,7 @@ export default function MasterPage({ spec }) {
         {filterFields.map((f) => (
           <label key={f.name} className="filter">
             <span>{f.label}</span>
-            <RefSelect slug={f.ref} value={filters[f.name] || null} blank={`All`}
+            <RefSelect slug={f.ref} value={filters[f.name] || null} blank="All" keyBy={f.key}
                        includeInactive onChange={(v) => setFilter(f.name, v)} />
           </label>
         ))}
@@ -253,6 +294,11 @@ export default function MasterPage({ spec }) {
             </select></label>
         )}
         <div className="toolbar-actions">
+          <button className="btn" onClick={() => filePick.current?.click()} disabled={busy}>Upload Excel</button>
+          <input ref={filePick} type="file" hidden accept=".xlsx,.xlsm,.csv"
+                 onChange={(e) => { const l = [...e.target.files]; e.target.value = ''; setUpFiles(l); upload(true, l) }} />
+          <button className="btn" onClick={() => api.masterExport(spec.slug).catch((e) => say(e.message, true))}>
+            Download Excel</button>
           {spec.year_bound && <button className="btn" onClick={openCopy}>Copy from a year</button>}
           {spec.bulk_by_sku && <button className="btn" onClick={openBulk}>Assign a whole group</button>}
           <button className="btn primary" onClick={openAdd}>Add {singular(spec.title)}</button>
@@ -274,22 +320,33 @@ export default function MasterPage({ spec }) {
         </form>
       )}
 
+      {mode === 'upload' && report && (
+        <section className="panel editor">
+          <h3>{report.dry_run ? `Check of ${upFiles.map((f) => f.name).join(', ')}` : 'Upload done'}</h3>
+          <UploadReport report={report} />
+          <div className="actions">
+            {report.dry_run && <button className="btn primary" disabled={busy} onClick={() => upload(false)}>Import</button>}
+            <button type="button" className="btn" onClick={close}>Close</button>
+          </div>
+        </section>
+      )}
+
       {mode === 'bulk' && (
         <form className="panel editor" onSubmit={bulk}>
-          <h3>Assign every SKU of a product group</h3>
-          <p className="fine">One row is added per active SKU. SKUs already assigned are left as they are.
+          <h3>Assign every product of a group</h3>
+          <p className="fine">One row is added per active product. Products already assigned are left as they are.
             Narrow it to one brand if only part of the group applies.</p>
           <div className="grid2">
             {editable(spec).filter((f) => f.name !== 'sku_id')
               .map((f) => <Input key={f.name} f={f} form={form} set={set} spec={spec} />)}
             <label htmlFor="f-brand"><span>Only this brand</span>
-              <RefSelect id="f-brand" slug="brand" value={form.brand_id || null} blank="— every brand —"
+              <RefSelect id="f-brand" slug="brand" value={form.brand_id || null} blank="Every brand"
                          params={{ product_group_id: form.product_group_id }}
                          waitingFor={!form.product_group_id ? 'product group' : null}
                          onChange={(v) => setForm((f) => ({ ...f, brand_id: v }))} /></label>
           </div>
           <div className="actions">
-            <button className="btn primary" disabled={busy}>Assign SKUs</button>
+            <button className="btn primary" disabled={busy}>Assign products</button>
             <button type="button" className="btn" onClick={close}>Close</button>
           </div>
         </form>

@@ -11,7 +11,12 @@ Two kinds of table live here, and the difference matters:
   alignment row carries a YearId and last year's alignment stays readable.
 
 Column names are explicit (PascalCase) to match schema.sql and the existing
-tables.
+tables — except the four master tables taken over from MASTER DATA & TABLES.xlsx
+(CUSTOMER_MASTER, EMPLOYEE_MASTER, PRODUCT_MASTER_BRAND, PRODUCT_MASTER), which
+keep that workbook's table and column names exactly, aliases included as
+columns. Their ZONE_ID, HQ_ID, TERRITORY_ID, PRODUCT_GROUP_ID, TEAM_ID, ROLE_ID
+and DESIGNATION_ID hold the parent's *Master ID* (LegacyId on the md_* table),
+which is the same number the old system used.
 """
 from __future__ import annotations
 
@@ -144,38 +149,6 @@ class ProductGroup(Base):
     __table_args__ = (UniqueConstraint("Code", name="uq_pg_code"),)
 
 
-class Brand(Base):
-    __tablename__ = "md_brand"
-    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = _code()
-    name: Mapped[str] = _name()
-    product_group_id: Mapped[int] = mapped_column(
-        "ProductGroupId", ForeignKey("md_product_group.Id"), nullable=False)
-    nrv: Mapped[str | None] = mapped_column("Nrv", String(20))
-    start_date: Mapped[date | None] = mapped_column("StartDate", Date)
-    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
-    legacy_id: Mapped[int | None] = _legacy()
-    active: Mapped[int] = _active()
-    __table_args__ = (UniqueConstraint("Code", name="uq_brand_code"),)
-
-
-class Sku(Base):
-    __tablename__ = "md_sku"
-    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = _code()
-    name: Mapped[str] = _name(250)
-    brand_id: Mapped[int] = mapped_column("BrandId", ForeignKey("md_brand.Id"), nullable=False)
-    pack_size: Mapped[str | None] = mapped_column("PackSize", String(40))
-    sap_product_id: Mapped[str | None] = mapped_column("SapProductId", String(25))
-    material_code: Mapped[str | None] = mapped_column("MaterialCode", String(50))
-    nrv: Mapped[str | None] = mapped_column("Nrv", String(20))
-    start_date: Mapped[date | None] = mapped_column("StartDate", Date)
-    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
-    legacy_id: Mapped[int | None] = _legacy()
-    active: Mapped[int] = _active()
-    __table_args__ = (UniqueConstraint("Code", name="uq_sku_code"),)
-
-
 class ProductReporting(Base):
     """A reporting line for a year, with its priority flag: P1, P2 or X (others)."""
     __tablename__ = "md_product_reporting"
@@ -195,56 +168,9 @@ class ProductReportingSku(Base):
     id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
     product_reporting_id: Mapped[int] = mapped_column(
         "ProductReportingId", ForeignKey("md_product_reporting.Id"), nullable=False)
-    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("md_sku.Id"), nullable=False)
+    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("PRODUCT_MASTER.PRODUCT_ID"), nullable=False)
     year_id: Mapped[int] = mapped_column("YearId", ForeignKey("md_year.Id"), nullable=False)
     __table_args__ = (UniqueConstraint("YearId", "SkuId", name="uq_prs_year_sku"),)
-
-
-# ============================================================== customers
-class Customer(Base):
-    __tablename__ = "md_customer"
-    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column("CustomerCode", String(30), nullable=False)
-    name: Mapped[str] = _name(200)
-    classification: Mapped[str] = mapped_column("Classification", String(40), nullable=False)
-    city: Mapped[str | None] = mapped_column("City", String(80))
-    country_id: Mapped[int | None] = mapped_column("CountryId", ForeignKey("md_country.Id"))
-    sap_id: Mapped[str | None] = mapped_column("SapId", String(50))
-    billing_name: Mapped[str | None] = mapped_column("BillingName", String(200))
-    # the customer's home geography, as the old system kept it; the yearly,
-    # SKU-level cover is in md_customer_assignment
-    zone_id: Mapped[int | None] = mapped_column("ZoneId", ForeignKey("md_zone.Id"))
-    headquarter_id: Mapped[int | None] = mapped_column("HeadquarterId", ForeignKey("md_headquarter.Id"))
-    territory_id: Mapped[int | None] = mapped_column("TerritoryId", ForeignKey("md_territory.Id"))
-    sub_territory: Mapped[str | None] = mapped_column("SubTerritory", String(120))
-    state: Mapped[str | None] = mapped_column("State", String(80))
-    remark: Mapped[str | None] = mapped_column("Remark", String(200))
-    start_date: Mapped[date | None] = mapped_column("StartDate", Date)
-    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
-    legacy_id: Mapped[int | None] = _legacy()
-    active: Mapped[int] = _active()
-    __table_args__ = (UniqueConstraint("CustomerCode", name="uq_customer_code"),)
-
-
-class SkuAlias(Base):
-    """Another name a SKU turns up under in distributors' files. The old
-    PRODUCT_ALIAS_1..100 columns, one row per name instead of a hundred columns."""
-    __tablename__ = "md_sku_alias"
-    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
-    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("md_sku.Id"), nullable=False)
-    alias: Mapped[str] = mapped_column("Alias", String(250), nullable=False)
-    __table_args__ = (UniqueConstraint("SkuId", "Alias", name="uq_sku_alias"),
-                      Index("ix_sku_alias", "Alias"))
-
-
-class CustomerAlias(Base):
-    """The old CUSTOMER_ALIAS_1..50 columns, one row per name."""
-    __tablename__ = "md_customer_alias"
-    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column("CustomerId", ForeignKey("md_customer.Id"), nullable=False)
-    alias: Mapped[str] = mapped_column("Alias", String(200), nullable=False)
-    __table_args__ = (UniqueConstraint("CustomerId", "Alias", name="uq_customer_alias"),
-                      Index("ix_customer_alias", "Alias"))
 
 
 # ================================================================= people
@@ -301,26 +227,90 @@ class TeamHeadquarter(Base):
     __table_args__ = (UniqueConstraint("YearId", "TeamId", "HeadquarterId", name="uq_thq"),)
 
 
-class Employee(Base):
-    __tablename__ = "md_employee"
-    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = _code()
-    name: Mapped[str] = _name()
-    designation_id: Mapped[int] = mapped_column(
-        "DesignationId", ForeignKey("md_designation.Id"), nullable=False)
-    role_id: Mapped[int | None] = mapped_column("RoleId", ForeignKey("md_role.Id"))
-    team_id: Mapped[int | None] = mapped_column("TeamId", ForeignKey("md_team.Id"))
-    headquarter_id: Mapped[int | None] = mapped_column("HeadquarterId", ForeignKey("md_headquarter.Id"))
-    reports_to_id: Mapped[int | None] = mapped_column("ReportsToId", ForeignKey("md_employee.Id"))
-    email: Mapped[str | None] = mapped_column("Email", String(120))
-    phone: Mapped[str | None] = mapped_column("Phone", String(30))
-    joining_date: Mapped[date | None] = mapped_column("JoiningDate", Date)
-    end_date: Mapped[date | None] = mapped_column("EndDate", Date)
-    territory_code: Mapped[str | None] = mapped_column("TerritoryCode", String(20))
-    rd_cs_editable: Mapped[int] = mapped_column("RdCsEditable", Integer, nullable=False, default=0)
-    legacy_id: Mapped[int | None] = _legacy()
-    active: Mapped[int] = _active()
-    __table_args__ = (UniqueConstraint("Code", name="uq_employee_code"),)
+# ============================================== the tables of MASTER DATA & TABLES.xlsx
+# Table and column names are the workbook's own. The Id column is the
+# workbook's id (CUSTOMER_ID ...), kept as uploaded, so a second upload updates
+# the same rows. STATUS is mapped to `active` so every screen treats it alike.
+CUSTOMER_ALIASES = 50
+PRODUCT_ALIASES = 100
+
+
+def _alias_cols(cls_ns: dict, prefix: str, n: int, width: int):
+    for i in range(1, n + 1):
+        cls_ns[f"alias_{i}"] = mapped_column(f"{prefix}{i}", String(width))
+
+
+class CustomerMaster(Base):
+    __tablename__ = "CUSTOMER_MASTER"
+    id: Mapped[int] = mapped_column("CUSTOMER_ID", Integer, primary_key=True, autoincrement=True)
+    customer_name: Mapped[str] = mapped_column("CUSTOMER_NAME", String(200), nullable=False)
+    customer_sap_id: Mapped[str | None] = mapped_column("CUSTOMER_SAP_ID", String(50))
+    zone_id: Mapped[int | None] = mapped_column("ZONE_ID", Integer)
+    hq_id: Mapped[int | None] = mapped_column("HQ_ID", Integer)
+    territory_id: Mapped[int | None] = mapped_column("TERRITORY_ID", Integer)
+    sub_territory_id: Mapped[int | None] = mapped_column("SUB_TERRITORY_ID", Integer)
+    customer_billing_name: Mapped[str | None] = mapped_column("CUSTOMER_BILLING_NAME", String(200))
+    state_id: Mapped[int | None] = mapped_column("STATE_ID", Integer)
+    cust_classification_id: Mapped[int | None] = mapped_column("CUST_CLASSIFICATION_ID", Integer)
+    cust_remark_id: Mapped[int | None] = mapped_column("CUST_REMARK_ID", Integer)
+    _alias_cols(locals(), "CUSTOMER_ALIAS_", CUSTOMER_ALIASES, 200)
+    start_date: Mapped[date | None] = mapped_column("START_DATE", Date)
+    end_date: Mapped[date | None] = mapped_column("END_DATE", Date)
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+    __table_args__ = (Index("ix_customer_master_name", "CUSTOMER_NAME"),)
+
+
+class EmployeeMaster(Base):
+    """EMPLOYEE_MASTER without its PASSWORD column: passwords are never stored
+    here (the upload reads past it)."""
+    __tablename__ = "EMPLOYEE_MASTER"
+    id: Mapped[int] = mapped_column("EMPLOYEE_ID", Integer, primary_key=True, autoincrement=True)
+    employee_ft_nm: Mapped[str] = mapped_column("EMPLOYEE_FT_NM", String(80), nullable=False)
+    employee_lt_nm: Mapped[str | None] = mapped_column("EMPLOYEE_LT_NM", String(80))
+    email: Mapped[str | None] = mapped_column("EMAIL", String(120))
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+    role_id: Mapped[int | None] = mapped_column("ROLE_ID", Integer)
+    designation_id: Mapped[int | None] = mapped_column("DESIGNATION_ID", Integer)
+    start_date: Mapped[date | None] = mapped_column("START_DATE", Date)
+    end_date: Mapped[date | None] = mapped_column("END_DATE", Date)
+    team: Mapped[str | None] = mapped_column("TEAM", String(80))
+    reporting_manager_id: Mapped[int | None] = mapped_column("REPORTING_MANAGER_ID", Integer)
+    rd_cs_editable: Mapped[int] = mapped_column("RD_CS_EDITABLE", Integer, nullable=False, default=0)
+    employee_code: Mapped[str | None] = mapped_column("EMPLOYEE_CODE", String(30))
+    territory_code: Mapped[str | None] = mapped_column("TERRITORY_CODE", String(30))
+
+    @property
+    def name(self) -> str:
+        return " ".join(x for x in (self.employee_ft_nm, self.employee_lt_nm) if x)
+
+
+class ProductMasterBrand(Base):
+    __tablename__ = "PRODUCT_MASTER_BRAND"
+    id: Mapped[int] = mapped_column("PRODUCT_BRAND_ID", Integer, primary_key=True, autoincrement=True)
+    product_brand_name: Mapped[str] = mapped_column("PRODUCT_BRAND_NAME", String(120), nullable=False)
+    product_group_id: Mapped[int | None] = mapped_column("PRODUCT_GROUP_ID", Integer)
+    start_date: Mapped[date | None] = mapped_column("START_DATE", Date)
+    end_date: Mapped[date | None] = mapped_column("END_DATE", Date)
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+    reporting: Mapped[str | None] = mapped_column("REPORTING", String(30))
+    team_id: Mapped[int | None] = mapped_column("TEAM_ID", Integer)
+    nrv: Mapped[str | None] = mapped_column("NRV", String(30))
+    no_of_sku: Mapped[int | None] = mapped_column("NO_OF_SKU", Integer)
+
+
+class ProductMaster(Base):
+    __tablename__ = "PRODUCT_MASTER"
+    id: Mapped[int] = mapped_column("PRODUCT_ID", Integer, primary_key=True, autoincrement=True)
+    sap_product_name: Mapped[str] = mapped_column("SAP_PRODUCT_NAME", String(250), nullable=False)
+    _alias_cols(locals(), "PRODUCT_ALIAS_", PRODUCT_ALIASES, 250)
+    product_brand_id: Mapped[int | None] = mapped_column("PRODUCT_BRAND_ID", Integer, index=True)
+    product_group_id: Mapped[int | None] = mapped_column("PRODUCT_GROUP_ID", Integer)
+    sap_product_id: Mapped[str | None] = mapped_column("SAP_PRODUCT_ID", String(30))
+    nrv: Mapped[float | None] = mapped_column("NRV", Numeric(18, 4))
+    start_date: Mapped[date | None] = mapped_column("START_DATE", Date)
+    end_date: Mapped[date | None] = mapped_column("END_DATE", Date)
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+    material_code: Mapped[str | None] = mapped_column("MATERIAL_CODE", String(50))
 
 
 # ============================================================ alignment
@@ -334,12 +324,12 @@ class CustomerAssignment(Base):
     __tablename__ = "md_customer_assignment"
     id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
     year_id: Mapped[int] = mapped_column("YearId", ForeignKey("md_year.Id"), nullable=False)
-    customer_id: Mapped[int] = mapped_column("CustomerId", ForeignKey("md_customer.Id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column("CustomerId", ForeignKey("CUSTOMER_MASTER.CUSTOMER_ID"), nullable=False)
     territory_id: Mapped[int] = mapped_column("TerritoryId", ForeignKey("md_territory.Id"), nullable=False)
     team_id: Mapped[int] = mapped_column("TeamId", ForeignKey("md_team.Id"), nullable=False)
     product_group_id: Mapped[int] = mapped_column(
         "ProductGroupId", ForeignKey("md_product_group.Id"), nullable=False)
-    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("md_sku.Id"), nullable=False)
+    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("PRODUCT_MASTER.PRODUCT_ID"), nullable=False)
     __table_args__ = (UniqueConstraint("YearId", "CustomerId", "SkuId", name="uq_ca_year_cust_sku"),
                       Index("ix_ca_territory", "YearId", "TerritoryId"))
 
@@ -349,11 +339,11 @@ class EmployeeAssignment(Base):
     __tablename__ = "md_employee_assignment"
     id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
     year_id: Mapped[int] = mapped_column("YearId", ForeignKey("md_year.Id"), nullable=False)
-    employee_id: Mapped[int] = mapped_column("EmployeeId", ForeignKey("md_employee.Id"), nullable=False)
+    employee_id: Mapped[int] = mapped_column("EmployeeId", ForeignKey("EMPLOYEE_MASTER.EMPLOYEE_ID"), nullable=False)
     territory_id: Mapped[int] = mapped_column("TerritoryId", ForeignKey("md_territory.Id"), nullable=False)
     product_group_id: Mapped[int] = mapped_column(
         "ProductGroupId", ForeignKey("md_product_group.Id"), nullable=False)
-    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("md_sku.Id"), nullable=False)
+    sku_id: Mapped[int] = mapped_column("SkuId", ForeignKey("PRODUCT_MASTER.PRODUCT_ID"), nullable=False)
     __table_args__ = (UniqueConstraint("YearId", "EmployeeId", "TerritoryId", "SkuId",
                                        name="uq_ea_year_emp_terr_sku"),
                       Index("ix_ea_territory", "YearId", "TerritoryId"))

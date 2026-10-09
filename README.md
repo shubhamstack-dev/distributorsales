@@ -25,6 +25,13 @@ Two settings are not optional:
 * **`SECRET_KEY`** — signs the session tokens. Generate once with
   `openssl rand -hex 32` and never change it; changing it signs everybody out.
 
+## The screens
+
+Dark, in the look of atomsolar.in: a sidebar with Convert, Batches, Rules and
+Masters. **Convert** shows the Month, Year and Mid Month every row will carry
+before anything is converted. Fonts are Fraunces, Mukta and Michroma from
+Google Fonts, with system fallbacks if they cannot load.
+
 ## The shape of it
 
 **Distributors are data, not code.** Each one carries its own cut-off day,
@@ -34,7 +41,7 @@ wants. The three are seeded on first run:
 | | Cut-off | Invoice No | Files it picks |
 |---|---|---|---|
 | Yetichem | 15th | `INV - 1` sequence | the three `PW` workbooks (AHCPW, AILGPW, AILNPW .xls) |
-| Pharmachem | 10th | read from the file | chosen by hand |
+| Pharmachem | 10th (Mid Month: 11th) | read from the file | every Excel file in the zip; sheet 3 sales, sheet 4 returns |
 | Gunjeshwari | 10th | `INV - 1` sequence | **ALI BATCHWISE\*.pdf** and **AHL BATCHWISE\*.pdf**, from two zips uploaded together |
 
 Edit them on the **Rules** screen. A cut-off corrected there is not undone by
@@ -79,6 +86,38 @@ a stocks file is not, and the three become one sheet.
 | 9 | Rate = Amount / Quantity (0 for a free-only line) | Rate = **Amount ÷ Quantity** on Rules |
 | 11 | B.Amount and Amount are the same, read from the file (the row under the quantities) | |
 | — | Special characters removed from customer and product names; rows with quantity and free quantity both 0 are left out, as are Total rows and columns | `parse.clean`, cross-tab reader |
+
+## Pharmachem's four workbooks
+
+Pharmachem sends a zip of **four Excel files**. Choose Pharmachem on **Convert**
+and drop the zip: every workbook in it is ticked (pattern `\.(xlsx|xlsm|xls)$`)
+and the four become one sheet. From each workbook **sheet 3 is read as sales and
+sheet 4 as sales returns**; the other sheets are left alone. A sheet named
+`Sheet3` / `Sheet 4` is taken first, otherwise the third and fourth in order.
+
+### The rule, as given
+
+| # | Rule | Where it is done |
+|---|---|---|
+| 1 | Distributor Name is always Pharmachem | the distributor chosen on Convert |
+| 2 | Invoice No read from the file (filled down where a bill's later lines leave it blank) | Invoice No = **Read from the file** |
+| 3 | Uploaded on the 1st–10th: Month is the previous month, otherwise the current month, in full | Month cut-off day 10 |
+| 4 | Year is the current year, YYYY | the month rule |
+| 5 | Uploaded on the 1st–**11th**: Mid Month is N, otherwise Y | **Mid Month cut-off day 11**, its own setting on Rules |
+| 6–7 | Customer Name and Product Name from the file | `parse.read_register` |
+| 8 | Quantity and Free Quantity from the file; positive on sheet 3, negative on sheet 4 | Sales / Sales return sheet = 3 / 4 |
+| 9 | Rate from the file (a price, so never negative) | Rate = **Read from the file** |
+| 11 | B.Amount and Amount each read from its own column; positive on sheet 3, negative on sheet 4 | `parse.read_register` |
+| — | All special characters omitted from customer and product names, except that the `.` is kept in product names | Product names = **Keep the '.'** |
+
+Rules 3 and 5 name different days, and are kept as written: on the 11th, Month
+is the current month and Mid Month is still N. Change either on **Rules**.
+
+The register is read from its header row, in the usual words (Invoice / Bill
+No, Party / Customer, Item / Product, Qty, Free / Sch, Rate / PTR, B.Amount /
+Basic / Gross, Amount / Net Amount). Total lines and lines with quantity and
+free both 0 are left out. Sheet 3 rows are positive and sheet 4 rows negative
+whatever sign the file printed, as the rule says.
 
 ## Gunjeshwari's two zips of PDFs
 
@@ -172,14 +211,18 @@ Gunjeshwari's note was still a seeded default — anything typed on Rules stays.
 ## The rules, in one place
 
 `app/services/rules.py`. On or before the cut-off: the month steps back one and
-Mid Month is `N`. After it: the current month, and `Y`. Year is the current
+Mid Month is `N`. After it: the current month, and `Y`. A distributor can give
+Mid Month its own cut-off (Pharmachem: 10th for the month, 11th for Mid Month). Year is the current
 year, as the rule says — including the one case where the month steps back past
 January and the year then reads oddly. The screen warns about that case rather
 than silently correcting a stated rule; say the word and it can step back too.
 
 ## Tests
 
-    cd backend && pytest -q        # 95 tests (27 conversion + 7 PDF + 4 Yetichem + 13 Gunjeshwari + 9 Gunjeshwari hand-picked files + 30 master data + 5 legacy import)
+    cd backend && pytest -q        # conversion, PDF, Yetichem, Gunjeshwari, Pharmachem, master data and master upload
+
+`tests/test_api.py` reads a sample zip (FW__MID-MONTH_SALES.zip) from
+/mnt/user-data/uploads; put it there, or those tests error.
 
 They cover the gate (every route is walked without a token and must refuse),
 the month rule across the year and both cut-offs, the parser against the real
@@ -189,84 +232,90 @@ totals checked at each step. The suite asserts the numbers this replaced:
 
 ## Master data
 
-The **Masters** screen holds the structure sales are reported against, grouped
-down the left-hand side:
+The **Masters** screen holds the structure sales are reported against:
 
 | Group | Masters |
 |---|---|
 | Setup | Years, Distributors, Companies, Countries, Currency rates, Company › Countries |
 | Geography | Zones › Headquarters › Territories |
-| Products | Product groups › Brands › SKUs, Product reporting (P1 / P2 / X), Product reporting › SKUs |
-| Customers | Customers (Customer ID, name, classification) |
-| People | Designations, Roles, Teams, Team › Product groups, Team › Headquarters, Employees |
-| Alignment | Customer alignment, Employee alignment (both at SKU level) |
+| Products | Product groups, **Brands** (`PRODUCT_MASTER_BRAND`), **Products** (`PRODUCT_MASTER`), Product reporting (P1 / P2 / X), Product reporting › SKUs |
+| Customers | **Customers** (`CUSTOMER_MASTER`) |
+| People | Designations, Roles, Teams, Team › Product groups, Team › Headquarters, **Employees** (`EMPLOYEE_MASTER`) |
+| Alignment | Customer alignment, Employee alignment (both at product level) |
 
-**Structure is permanent; alignment is per year.** A territory sits under one
-HQ and an SKU under one brand, and that does not change year to year. Which team
-carries which product group, and which customer and employee cover which SKU in
-which territory, is realigned every year — so every alignment row carries a
-Year, and last year's alignment stays readable. *Copy from a year* starts a new
-year from the old one; change only what moved.
+### The tables of MASTER DATA & TABLES.xlsx
 
-**The rules between masters are enforced, with the fix in the message.** A
-customer's SKU can only be assigned to a team that carries its product group
-and covers its territory's HQ that year. A SKU reports under one line per year.
-A reporting line cannot go round in a circle. A row still in use cannot be
-deleted — the message says what uses it, and suggests marking it inactive.
+Customers, Brands, Products and Employees are the four tables of MASTER DATA &
+TABLES.xlsx, **with its table and column names**: `CUSTOMER_MASTER` (64
+columns), `PRODUCT_MASTER` (110), `PRODUCT_MASTER_BRAND` and `EMPLOYEE_MASTER`.
+They replace the earlier `md_customer`, `md_sku`, `md_brand` and `md_employee`.
 
-**SKU level without typing every SKU.** *Assign a whole group* adds one row per
-active SKU of a product group (or one brand of it), skipping any already there.
+* **Aliases live on the row.** `CUSTOMER_ALIAS_1`–`50` and
+  `PRODUCT_ALIAS_1`–`100` are columns, as in the workbook, edited as one list
+  (a name per line). The separate *Customer aliases* and *SKU aliases* screens
+  are gone. Search finds a row by any of its aliases.
+* **IDs are the workbook's.** `CUSTOMER_ID`, `PRODUCT_ID` … are kept as
+  uploaded and cannot be changed afterwards; a row added on screen without one
+  gets the next number.
+* **Master IDs link them to their parents.** `ZONE_ID`, `HQ_ID`,
+  `TERRITORY_ID`, `PRODUCT_GROUP_ID`, `TEAM_ID`, `ROLE_ID` and `DESIGNATION_ID`
+  hold the parent's **Master ID** — a column on Zones, Headquarters,
+  Territories, Product groups, Teams, Roles and Designations, given
+  automatically if left blank. An ID whose parent is not uploaded yet is kept
+  and shown as "12 (not in Zones)"; 0 means none.
+* **`PASSWORD` is never stored.** The upload reads past it.
+* `REPORTING_MANAGER_ID` equal to the employee's own ID marks the top of the
+  tree, as the workbook does; a real circle is refused.
+
+### Uploading master data
+
+**Masters › Upload master data** takes MASTER DATA & TABLES.xlsx as it is, or
+any workbook / CSV per master. Every master can be uploaded, the same way:
+
+* A sheet is read into the master it is named after: the table name
+  (`CUSTOMER_MASTER` …), the old system's (`ZONE`, `HQ_MASTER`, `TERRITORY`,
+  `PRODUCT_MASTER_GROUP`, `TEAM`, `ROLE_MASTER`, `DESIGNATION`), or the
+  screen's title (Years, Countries …).
+* Columns are found by header: the workbook's column name, the screen's label,
+  or the old name (`ZONE_NAME`, `HQ_ID` …). A reference is a Master ID, code or
+  name. Parents are read before children whatever the sheet order.
+* **Check** does the whole upload and rolls it back, showing what would be
+  added, updated, unchanged and left out — each left-out row with its reason.
+  **Import** then saves. Uploading again updates the same rows; nothing is
+  deleted; only the columns a sheet carries are changed.
+* Every master page also has **Upload Excel** (that master only) and
+  **Download Excel**, which writes the same headers back — so a download is
+  also the template. **Download every master** gives one workbook of all.
+
+`POST /api/masters/upload` (files, `dry_run`, optional `slug`),
+`GET /api/masters/{slug}/export`, `GET /api/masters/export-all`.
+
+**Structure is permanent; alignment is per year.** *Copy from a year* starts a
+new year from the old one. A customer's product can only be assigned to a team
+that carries its product group and covers its territory's HQ that year.
 
 **INR and NPR.** India and Nepal are seeded, with the rate at the 1.60 peg from
-2000-01-01 — confirm it. A rate is kept one way (INR → NPR) and the other way is
-its inverse, so the two can never disagree; a new rate applies from its date.
-`GET /api/currency/convert?amount=&frm=NPR&to=INR&on=` converts on any day.
+2000-01-01 — confirm it. `GET /api/currency/convert?amount=&frm=NPR&to=INR&on=`.
 
 **One definition drives everything.** `app/masters/specs.py` describes each
-master — fields, uniqueness, validation, what points at it. The API and the
-screens are both drawn from it, so a field added there appears on the screen
-with no front-end change.
+master — fields, uniqueness, validation, upload names. The API, the screens and
+the upload are all drawn from it.
 
 **Upgrading an existing database** needs nothing by hand: on startup the API
-creates the new `md_*` tables and adds the new distributor columns (Code,
-Country, contact details). To apply by hand instead: `migrations/001_…sql`
-(old databases only), then `schema.sql`, then `schema_masters.sql`.
-
-## Importing the old SQL Server data
-
-**Masters › Tools › Import old data** brings the old Abbott masters across.
-
-1. In SQL Server Management Studio run `SELECT * FROM dbo.<TABLE>` for each table
-   below, right-click the results → **Copy with Headers**, paste into Excel and
-   save as `<TABLE>.xlsx` (for example `PRODUCT_MASTER.xlsx`). One workbook with
-   a sheet per table, each sheet named after its table, works too.
-2. Choose all the files, press **Check** (a dry run: nothing is saved), read the
-   report, then press **Import**.
-
-| Old table | Becomes |
-|---|---|
-| PRODUCT_MASTER_GROUP | Product groups |
-| PRODUCT_MASTER_BRAND | Brands; REPORTING → a P1/P2/X reporting line per brand; TEAM_ID → Team › Product groups |
-| PRODUCT_MASTER | SKUs (SAP id, material code, NRV, dates); PRODUCT_ALIAS_1..100 → SKU aliases |
-| ZONE, HQ_MASTER, TERRITORY | Zones › Headquarters › Territories (India by default) |
-| CUSTOMER_MASTER | Customers (SAP id, billing name, zone/HQ/territory, dates); CUSTOMER_ALIAS_1..50 → Customer aliases |
-| STATE, customer CLASSIFICATION / REMARK, SUB_TERRITORY | Names stored on the customer |
-| ROLE_MASTER, DESIGNATION, TEAM | Roles, Designations, Teams (matched by name to teams already typed in) |
-| EMPLOYEE_MASTER | Employees, with reporting manager; **passwords are never copied** |
-
-Every imported row keeps its old id in **LegacyId**, so running the import
-again updates instead of duplicating, and nothing is ever deleted. A row pointed
-at but not sent (a customer's HQ 12 with no HQ file) becomes a placeholder
-"HQ #12" until that table is sent. The same import runs from the command line:
-`python -m app.services.legacy_import FILE... [--commit] [--year-id N]`.
+creates the new tables, adds the new columns, gives existing parents a Master
+ID and repoints the alignment keys. The old `md_customer` / `md_sku` /
+`md_brand` / `md_employee` / alias tables are left in place unused; see
+`migrations/003_master_data_tables.sql` to drop them once the masters are
+uploaded again.
 
 ## What it does not do
 
 * **Scanned PDFs.** A PDF is read from its text (`pdfplumber`), so a scan or
   photo has nothing to read and is refused with a reason rather than guessed at.
 * **Linking converted sales rows to the masters.** Batches still store the names
-  exactly as the distributor sent them. Mapping those names to Customer IDs and
-  SKUs is the natural next step, and the masters are shaped for it.
+  as read from the file (cleaned). Mapping them to `CUSTOMER_ID` / `PRODUCT_ID`
+  through the aliases now kept on CUSTOMER_MASTER and PRODUCT_MASTER is the
+  natural next step.
 * **Customer-name mapping.** Gunjeshwari's names were matched against a
   reference list by hand, with two matches flagged as doubtful at the time.
   Names are cleaned here, not mapped.

@@ -20,10 +20,11 @@ export default function Login({ onSignedIn }) {
       <form className="signin-card" onSubmit={go}>
         <div className="signin-head"><span className="mark" aria-hidden="true" />
           <div><h1>Distributor sales</h1>
-            <p>Convert the workbooks into the standard sheet.</p></div></div>
+            <p>Turn distributors' files into the standard sales sheet.</p></div></div>
         {err && <div className="alert bad">{err}</div>}
-        <label htmlFor="who">Your name <small>(recorded on each batch)</small></label>
-        <input id="who" value={who} onChange={(e) => setWho(e.target.value)} placeholder="e.g. Alok" />
+        <label htmlFor="who">Your name <small>Recorded on every batch you convert</small></label>
+        <input id="who" value={who} onChange={(e) => setWho(e.target.value)} placeholder="e.g. Alok"
+               autoComplete="name" />
         <label htmlFor="pw">Password</label>
         <input id="pw" type="password" autoComplete="current-password"
                value={password} onChange={(e) => setPassword(e.target.value)} />

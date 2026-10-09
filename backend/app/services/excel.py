@@ -47,6 +47,9 @@ def build(batch, rows, files) -> bytes:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:L{len(rows) + 1}"
 
+    d = batch.distributor
+    mid = batch.mid_cutoff_day or batch.cutoff_day
+    sheets = bool(d.sales_sheet or d.return_sheet)
     used = [f for f in files if f.used]
     left = [f for f in files if not f.used]
     notes = [
@@ -59,9 +62,11 @@ def build(batch, rows, files) -> bytes:
         ("Produced for the date", batch.as_of.strftime("%d %B %Y")),
         ("Month cut-off day", str(batch.cutoff_day)),
         ("Month", f"{batch.month_name} - day {batch.as_of.day} is "
-                  f"{'on or before' if batch.mid_month == 'N' else 'after'} the {batch.cutoff_day}th"),
+                  f"{'on or before' if batch.as_of.day <= batch.cutoff_day else 'after'} the "
+                  f"{batch.cutoff_day}th"),
         ("Year", str(batch.year)),
-        ("Mid Month", batch.mid_month),
+        ("Mid Month", f"{batch.mid_month} - day {batch.as_of.day} is "
+                      f"{'on or before' if batch.mid_month == 'N' else 'after'} the {mid}th"),
         ("Invoice No", "Read from the file where present, otherwise numbered in sequence."
                        if batch.invoice_mode == "file"
                        else "INV - 1 upwards, one running number across every file."),
@@ -69,9 +74,18 @@ def build(batch, rows, files) -> bytes:
                   if (batch.distributor.rate_mode or "calc") == "file" else
                   "Amount divided by Quantity. Zero where quantity is zero, so a free-only line "
                   "cannot divide by zero.")),
-        ("B.Amount and Amount", "Both read from the file and identical."),
-        ("Names", "Special characters removed; punctuation became a space, so 'Pvt.ltd.' reads "
-                  "'Pvt ltd' rather than 'Pvtltd'."),
+        ("B.Amount and Amount", ("Each read from its own column of the file (where the file has "
+                                 "only one, both carry it). Sales positive, sales returns "
+                                 "negative." if sheets else "Both read from the file and identical.")),
+        ("Sheets read", (f"Sheet {d.sales_sheet} of each workbook as sales"
+                         + (f", sheet {d.return_sheet} as sales returns (quantity, free, B.Amount "
+                            f"and Amount negative)" if d.return_sheet else "") + ".")
+         if sheets else "Every sheet; a sheet named as a return is negated."),
+        ("Names", ("Special characters removed; punctuation became a space. Customer names lose "
+                   "every special character; product names keep the '.'."
+                   if d.product_keep_dot else
+                   "Special characters removed; punctuation became a space, so 'Pvt.ltd.' reads "
+                   "'Pvt ltd' rather than 'Pvtltd'.")),
         ("Name mapping and notes", batch.notes or "No reference name lists were applied."),
         ("", ""),
         ("Rows written", str(batch.row_count)),

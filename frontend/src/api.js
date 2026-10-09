@@ -105,25 +105,29 @@ export const api = {
   masterDeleteMany: (slug, ids) => call('POST', `/api/masters/${slug}/delete-many`, { ids }),
   masterBulk: (slug, body) => call('POST', `/api/masters/${slug}/bulk`, body),
   masterCopyYear: (slug, body) => call('POST', `/api/masters/${slug}/copy-year`, body),
-  legacyImport: (files, dryRun, yearId, onProgress) => {
+  masterUpload: (files, dryRun, slug, onProgress) => {
     const fd = new FormData()
     files.forEach((f) => fd.append('files', f))
     fd.append('dry_run', dryRun ? 'true' : 'false')
-    if (yearId) fd.append('year_id', yearId)
-    return upload('/api/legacy-import', fd, onProgress)
+    if (slug) fd.append('slug', slug)
+    return upload('/api/masters/upload', fd, onProgress)
   },
+  masterExport: (slug) => save(`/api/masters/${slug}/export`, `${slug}.xlsx`),
+  masterExportAll: () => save('/api/masters/export-all', 'MASTER_DATA.xlsx'),
   rate: (frm, to, on) => call('GET', `/api/currency/rate?${qs({ frm, to, on })}`),
   convert: (amount, frm, to, on) => call('GET', `/api/currency/convert?${qs({ amount, frm, to, on })}`),
-  // the export needs the token in a header, so it is fetched and then saved
-  download: async (id) => {
-    const res = await fetch(`/api/batches/${id}/export`, { headers: auth() })
-    if (!res.ok) { await handle(res); return }
-    const cd = res.headers.get('content-disposition') || ''
-    const name = (/filename="([^"]+)"/.exec(cd) || [])[1] || `batch-${id}.xlsx`
-    const url = URL.createObjectURL(await res.blob())
-    const a = document.createElement('a')
-    a.href = url; a.download = name; document.body.appendChild(a); a.click()
-    a.remove(); URL.revokeObjectURL(url)
-    return name
-  },
+  download: (id) => save(`/api/batches/${id}/export`, `batch-${id}.xlsx`),
+}
+
+/** A file download that needs the token in a header: fetched, then saved. */
+async function save(url, fallback) {
+  const res = await fetch(url, { headers: auth() })
+  if (!res.ok) { await handle(res); return }
+  const cd = res.headers.get('content-disposition') || ''
+  const name = (/filename="([^"]+)"/.exec(cd) || [])[1] || fallback
+  const href = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = href; a.download = name; document.body.appendChild(a); a.click()
+  a.remove(); URL.revokeObjectURL(href)
+  return name
 }

@@ -24,9 +24,11 @@ export function useOptions(slug, params, enabled = true) {
 /** A select for a field that points at another master. Long lists (customers,
  *  SKUs) get a filter box above them; `params` narrows the list, e.g. SKUs to
  *  the product group chosen beside it. */
-export default function RefSelect({ slug, value, onChange, params = {}, blank = '— choose —',
-                                    waitingFor, id, required, includeInactive, currentLabel }) {
-  const opts = useOptions(slug, includeInactive ? { ...params, include_inactive: 1 } : params,
+export default function RefSelect({ slug, value, onChange, params = {}, blank = 'Choose…',
+                                    waitingFor, id, required, includeInactive, currentLabel, keyBy }) {
+  // keyBy="legacy_id": the value is the row's Master ID, as the Excel tables store it
+  const p = keyBy ? { ...params, key: keyBy } : params
+  const opts = useOptions(slug, includeInactive ? { ...p, include_inactive: 1 } : p,
     !waitingFor)
   const [filter, setFilter] = useState('')
   const shown = useMemo(() => {
@@ -36,7 +38,7 @@ export default function RefSelect({ slug, value, onChange, params = {}, blank = 
     // keep the chosen value visible even when the filter or "active only" hides it
     if (value && !list.some((o) => String(o.id) === String(value))) {
       const cur = opts.find((o) => String(o.id) === String(value))
-      list = [cur || { id: value, label: currentLabel || `#${value} (inactive)` }, ...list]
+      list = [cur || { id: value, label: currentLabel || `${value} (inactive or not in the list)` }, ...list]
     }
     return list
   }, [opts, filter, value, currentLabel])

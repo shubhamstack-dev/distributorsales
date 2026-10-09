@@ -49,7 +49,16 @@ def _dist_out(d: M.Distributor) -> dict:
     return {"id": d.id, "name": d.name, "cutoff_day": d.cutoff_day,
             "invoice_mode": d.invoice_mode, "negate_returns": bool(d.negate_returns),
             "pick_pattern": d.pick_pattern, "note": d.note, "active": bool(d.active),
-            "rate_mode": d.rate_mode or "calc", "select_any": _any_file(d)}
+            "rate_mode": d.rate_mode or "calc", "select_any": _any_file(d),
+            "mid_cutoff_day": d.mid_cutoff_day or d.cutoff_day,
+            "sales_sheet": d.sales_sheet, "return_sheet": d.return_sheet,
+            "product_keep_dot": bool(d.product_keep_dot)}
+
+
+def _read_opts(d) -> dict:
+    """How this distributor's files are read, beyond the month rule."""
+    return {"sales_sheet": d.sales_sheet, "return_sheet": d.return_sheet,
+            "keep_dot": bool(d.product_keep_dot)}
 
 
 @router.get("/distributors")
@@ -68,6 +77,29 @@ def update_distributor(did: int, body: dict = Body(...), db: Session = Depends(g
         if not 1 <= c <= 28:
             raise HTTPException(422, "The cut-off day has to be between 1 and 28")
         d.cutoff_day = c
+    if "mid_cutoff_day" in body:
+        v = body["mid_cutoff_day"]
+        if v in (None, ""):
+            d.mid_cutoff_day = None
+        else:
+            v = int(v)
+            if not 1 <= v <= 28:
+                raise HTTPException(422, "The Mid Month cut-off day has to be between 1 and 28")
+            d.mid_cutoff_day = None if v == d.cutoff_day else v
+    for k, what in (("sales_sheet", "sales"), ("return_sheet", "sales returns")):
+        if k in body:
+            v = body[k]
+            if v in (None, "", 0, "0"):
+                setattr(d, k, None)
+            else:
+                v = int(v)
+                if not 1 <= v <= 50:
+                    raise HTTPException(422, f"The {what} sheet is a number from 1 to 50")
+                setattr(d, k, v)
+    if d.sales_sheet and d.return_sheet and d.sales_sheet == d.return_sheet:
+        raise HTTPException(422, "Sales and sales returns cannot be read from the same sheet")
+    if "product_keep_dot" in body:
+        d.product_keep_dot = 1 if body["product_keep_dot"] else 0
     if "invoice_mode" in body:
         if body["invoice_mode"] not in ("seq", "file"):
             raise HTTPException(422, "Invoice mode is either seq or file")
@@ -214,7 +246,8 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
     for name, data in books:
         with open(os.path.join(folder, name), "wb") as fh:
             fh.write(data)
-        r = parse.read_book(name, data, bool(d.negate_returns), any_file=any_file)
+        r = parse.read_book(name, data, bool(d.negate_returns), any_file=any_file,
+                            **_read_opts(d))
         out.append({
             "name": name, "rows": len(r["rows"]), "omitted": r["omitted"],
             "error": r["error"],
@@ -250,17 +283,20 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     except ValueError:
         raise HTTPException(422, "The date is not a real date")
     cutoff = int(body.get("cutoff_day") or d.cutoff_day)
+    mid_cutoff = int(body.get("mid_cutoff_day") or d.mid_cutoff_day or cutoff)
     invoice_mode = body.get("invoice_mode") or d.invoice_mode
     negate = bool(body.get("negate_returns", d.negate_returns))
     rate_mode = d.rate_mode or "calc"
     any_file = _any_file(d)
     on_disk = sorted(os.listdir(folder))
-    p = period(as_of, cutoff)
+    p = period(as_of, cutoff, mid_cutoff)
     map_customer, map_product = _mapper(db, d.id, "customer"), _mapper(db, d.id, "product")
 
     batch = M.Batch(distributor_id=d.id, source_name=(body.get("source") or "")[:255],
                     as_of=as_of, month_name=p["month"], year=p["year"],
-                    mid_month=p["mid_month"], cutoff_day=cutoff, invoice_mode=invoice_mode,
+                    mid_month=p["mid_month"], cutoff_day=cutoff,
+                    mid_cutoff_day=mid_cutoff if mid_cutoff != cutoff else None,
+                    invoice_mode=invoice_mode,
                     created_by=(body.get("who") or "user")[:120], created_at_utc=_now(),
                     notes=("The month stepped back past January; Year is the current year as "
                            "the rule says." if p["wrapped"] else None))
@@ -274,7 +310,8 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
         path = os.path.join(folder, name)
         with open(path, "rb") as fh:
             data = fh.read()
-        r = parse.read_book(name, data, negate, any_file=any_file) if used else None
+        r = parse.read_book(name, data, negate, any_file=any_file, **_read_opts(d)) \
+            if used else None
         if r and not r["rows"]:
             unread.append(name)
         bf = M.BatchFile(batch_id=batch.id, file_name=name, used=1 if used else 0,
@@ -301,7 +338,7 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
                 customer_name=map_customer(x["customer"])[:200],
                 product_name=map_product(x["product"])[:200],
                 quantity=x["qty"], free_quantity=x["free"], rate=rate,
-                b_amount=x["amount"], amount=x["amount"], source_file=name,
+                b_amount=x.get("b_amount", x["amount"]), amount=x["amount"], source_file=name,
                 is_return=1 if x["is_return"] else 0))
     if seq == 0:
         db.rollback()
@@ -331,6 +368,7 @@ def _batch_out(b: M.Batch) -> dict:
     return {"id": b.id, "distributor": b.distributor.name, "distributor_id": b.distributor_id,
             "source": b.source_name, "as_of": b.as_of, "month": b.month_name, "year": b.year,
             "mid_month": b.mid_month, "cutoff_day": b.cutoff_day, "invoice_mode": b.invoice_mode,
+            "mid_cutoff_day": b.mid_cutoff_day or b.cutoff_day,
             "rows": b.row_count, "omitted": b.omitted_count,
             "total_qty": float(b.total_qty), "total_amount": float(b.total_amount),
             "created_by": b.created_by, "created_at_utc": b.created_at_utc, "notes": b.notes}

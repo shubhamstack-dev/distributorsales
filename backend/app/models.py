@@ -28,7 +28,18 @@ class Distributor(Base):
     # "calc": Rate is Amount / Quantity. "file": Rate is read from the file
     # where it has a rate column (falling back to the calculation where not).
     rate_mode: Mapped[str] = mapped_column("RateMode", String(10), nullable=False, default="calc")
-    note: Mapped[str | None] = mapped_column("Note", String(500))
+    # Mid Month's own cut-off, where it differs from the month's (Pharmachem:
+    # Month steps back on the 1st-10th, Mid Month is N on the 1st-11th). Empty
+    # means the same day as CutoffDay.
+    mid_cutoff_day: Mapped[int | None] = mapped_column("MidCutoffDay", Integer)
+    # Which sheets of each workbook are read, by position (1 = the first) or by
+    # a sheet with that number in its name (Sheet3). Empty means every sheet,
+    # with returns told apart by the sheet's name, as before.
+    sales_sheet: Mapped[int | None] = mapped_column("SalesSheet", Integer)
+    return_sheet: Mapped[int | None] = mapped_column("ReturnSheet", Integer)
+    # 1: product names keep the '.' when special characters are removed.
+    product_keep_dot: Mapped[int] = mapped_column("ProductKeepDot", Integer, nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column("Note", String(700))
     active: Mapped[int] = mapped_column("Active", Integer, nullable=False, default=1)
     # Master details. Added after the first release, so services/migrate.py adds
     # them to a database that already has the table; all are nullable for that.
@@ -52,6 +63,7 @@ class Batch(Base):
     year: Mapped[int] = mapped_column("Year", Integer, nullable=False)
     mid_month: Mapped[str] = mapped_column("MidMonth", String(1), nullable=False)
     cutoff_day: Mapped[int] = mapped_column("CutoffDay", Integer, nullable=False)
+    mid_cutoff_day: Mapped[int | None] = mapped_column("MidCutoffDay", Integer)
     invoice_mode: Mapped[str] = mapped_column("InvoiceMode", String(10), nullable=False)
     row_count: Mapped[int] = mapped_column("RowCount", Integer, nullable=False, default=0)
     omitted_count: Mapped[int] = mapped_column("OmittedCount", Integer, nullable=False, default=0)
