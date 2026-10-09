@@ -60,7 +60,7 @@ def ensure_columns(engine: Engine) -> list[str]:
             for col, ddl in cols:
                 if col.lower() not in have:
                     cx.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
-                    done.append(f"{table}.{col}")
+                    done.append(f"column {table}.{col} added")
         if engine.dialect.name == "mysql":
             for table, col, ddl, n in WIDEN:
                 if table not in tables:
@@ -68,7 +68,7 @@ def ensure_columns(engine: Engine) -> list[str]:
                 cur = next((c for c in inspect(cx).get_columns(table) if c["name"] == col), None)
                 if cur is not None and (getattr(cur["type"], "length", None) or n) < n:
                     cx.execute(text(f"ALTER TABLE {table} MODIFY {col} {ddl}"))
-                    done.append(f"{table}.{col} widened")
+                    done.append(f"column {table}.{col} widened")
             for table, name, col, ref, refcol in FKS:
                 if table not in tables:
                     continue
@@ -79,13 +79,27 @@ def ensure_columns(engine: Engine) -> list[str]:
                            for fk in fks):
                     cx.execute(text(f"ALTER TABLE {table} ADD CONSTRAINT {name} "
                                     f"FOREIGN KEY ({col}) REFERENCES {ref}({refcol})"))
-                    done.append(f"{table}.{name}")
+                    done.append(f"key {table}.{name} added")
+            archived: set[str] = set()
             for table, col, ref, refcol in REPOINT:
                 if table not in tables:
                     continue
                 fks = inspect(cx).get_foreign_keys(table)
                 for fk in fks:
                     if fk.get("constrained_columns") == [col] and fk.get("referred_table") in OLD_TARGETS:
+                        if table not in archived:
+                            # The rows' ids name the OLD md_customer / md_sku /
+                            # md_employee rows. Left in place, CustomerId 1 would
+                            # read as CUSTOMER_MASTER 1 - another customer - once
+                            # the workbook is uploaded. They are moved, once, to
+                            # <table>_before_master_tables, with nothing lost.
+                            keep = f"{table}_before_master_tables"
+                            cx.execute(text(f"CREATE TABLE IF NOT EXISTS {keep} AS SELECT * FROM {table}"))
+                            n = cx.execute(text(f"DELETE FROM {table}")).rowcount
+                            archived.add(table)
+                            if n:
+                                done.append(f"{n} rows of {table} pointed at the old masters; moved to "
+                                            f"{keep}. Re-enter that alignment against the new masters")
                         cx.execute(text(f"ALTER TABLE {table} DROP FOREIGN KEY {fk['name']}"))
                         done.append(f"{table}.{fk['name']} (pointed at {fk['referred_table']}) dropped")
                 fks = inspect(cx).get_foreign_keys(table)

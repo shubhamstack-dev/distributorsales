@@ -18,5 +18,7 @@
 -- DROP TABLE md_employee;
 --
 -- Alignment rows (customer / employee alignment, product reporting > SKUs)
--- made before this change point at the old ids. The startup log names any
--- table where that is so; re-enter those rows against the new masters.
+-- made before this change name the old ids. On the first start they are moved,
+-- untouched, to md_customer_assignment_before_master_tables (and the same for
+-- the other two), so an old CustomerId cannot be read as a different
+-- CUSTOMER_MASTER customer. The startup log says how many; re-enter them.

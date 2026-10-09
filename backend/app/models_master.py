@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -236,8 +236,13 @@ PRODUCT_ALIASES = 100
 
 
 def _alias_cols(cls_ns: dict, prefix: str, n: int, width: int):
+    """CUSTOMER_ALIAS_1..50 / PRODUCT_ALIAS_1..100. On MySQL they are TEXT:
+    a hundred VARCHAR(250) columns come to ~100 KB a row in utf8mb4, past
+    MySQL's 65,535-byte row limit, and CREATE TABLE would fail. TEXT is kept
+    off the row. The width is still the longest alias the app accepts."""
     for i in range(1, n + 1):
-        cls_ns[f"alias_{i}"] = mapped_column(f"{prefix}{i}", String(width))
+        cls_ns[f"alias_{i}"] = mapped_column(
+            f"{prefix}{i}", String(width).with_variant(Text, "mysql", "mariadb"))
 
 
 class CustomerMaster(Base):

@@ -333,7 +333,7 @@ def test_an_older_database_gets_the_new_distributor_columns():
     eng = create_engine("sqlite://")
     with eng.begin() as cx:
         cx.execute(text("CREATE TABLE distributor (Id INTEGER PRIMARY KEY, Name VARCHAR(60))"))
-    assert "distributor.CountryId" in ensure_columns(eng)
+    assert "column distributor.CountryId added" in ensure_columns(eng)
     assert ensure_columns(eng) == []                              # and only once
     cols = {x["name"] for x in inspect(eng).get_columns("distributor")}
     assert {"Code", "CountryId", "ContactPerson", "Phone", "Email", "MidCutoffDay",

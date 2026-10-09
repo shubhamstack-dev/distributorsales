@@ -48,7 +48,7 @@ app.include_router(masters.router)
 Base.metadata.create_all(engine)
 try:
     for added in migrate.ensure_columns(engine):
-        print(f"[startup] added {added}", flush=True)
+        print(f"[startup] {added}", flush=True)
 except Exception as e:
     print(f"[startup] could not bring the tables up to date: {e}", flush=True)
 os.makedirs(config.STAGING_DIR, exist_ok=True)
