@@ -34,29 +34,66 @@ a{color:var(--cyan-2)}
 ::selection{background:rgba(98,230,242,.3)}
 
 /* ------------------------------------------------------------ the frame */
-.app{display:grid;grid-template-columns:224px minmax(0,1fr);min-height:100vh}
-.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:3px;
-  padding:22px 14px 18px;background:linear-gradient(180deg,#02060D,#050B16);
-  border-right:1px solid var(--line)}
-.side::after{content:"";position:absolute;top:0;bottom:0;right:-1px;width:1px;
-  background:linear-gradient(180deg,transparent,rgba(98,230,242,.45),rgba(255,181,71,.35),transparent)}
-.brand{display:flex;align-items:center;gap:12px;padding:0 8px 26px}
-.mark{width:38px;height:38px;flex:0 0 38px;border-radius:50%;display:inline-block;
+/* A bar across the top instead of a rail down the side, so every screen gets the
+   full width. Masters opens as one panel under the bar (MastersMenu.jsx). */
+.app{min-height:100vh}
+.topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:22px;
+  min-height:66px;padding:10px 34px;border-bottom:1px solid var(--line)}
+/* the glass is a layer of its own: backdrop-filter on the bar itself would make
+   the bar the box that the menu's full-screen scrim is fixed to */
+.topbar::before{content:"";position:absolute;inset:0;z-index:-2;
+  background:linear-gradient(180deg,rgba(2,6,13,.94),rgba(5,11,22,.88));
+  backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%)}
+.topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(98,230,242,.45) 30%,rgba(255,181,71,.35) 70%,transparent)}
+.brand{display:flex;align-items:center;gap:12px;flex:none}
+.mark{width:36px;height:36px;flex:0 0 36px;border-radius:50%;display:inline-block;
   background:url(/aequm-mark.png) center/cover no-repeat,linear-gradient(135deg,var(--cyan),var(--blue));
   box-shadow:0 0 18px var(--glow)}
-.brand b{display:block;font:400 .78rem/1.3 var(--tech);letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
-.brand small{display:block;color:var(--ink-3);font-size:.8rem;margin-top:2px}
-.side a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;
-  color:var(--ink-2);text-decoration:none;font-weight:500}
-.side a svg{width:19px;height:19px;flex:none;opacity:.85}
-.side a:hover{background:rgba(255,255,255,.05);color:var(--ink)}
-.side a.active{background:linear-gradient(135deg,rgba(43,212,200,.16),rgba(14,107,216,.16));
+.brand b{display:block;font:400 .74rem/1.3 var(--tech);letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
+.brand small{display:block;color:var(--ink-3);font-size:.8rem;margin-top:1px}
+.nav{display:flex;align-items:center;gap:4px;min-width:0}
+.nav-item{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:9px;
+  padding:8px 13px;border-radius:10px;color:var(--ink-2);text-decoration:none;font:500 .97rem var(--body);
+  white-space:nowrap}
+.nav-item svg{width:18px;height:18px;flex:none;opacity:.85;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.nav-item:hover{background:rgba(255,255,255,.05);color:var(--ink)}
+.nav-item:focus-visible{outline:2px solid var(--cyan-2);outline-offset:2px}
+.nav-item.active{background:linear-gradient(135deg,rgba(43,212,200,.16),rgba(14,107,216,.16));
   color:#fff;box-shadow:inset 0 0 0 1px rgba(98,230,242,.28)}
-.side a.active svg{color:var(--cyan-2);opacity:1}
-.side .grow{flex:1}
-.side .who{border-top:1px solid var(--line);padding:14px 10px 0;font-size:.86rem;color:var(--ink-3)}
-.side .who b{display:block;color:var(--ink);font-weight:600;font-size:.95rem}
-.side .who .btn{margin-top:10px;width:100%}
+.nav-item.active svg{color:var(--cyan-2);opacity:1}
+.nav-item.open{background:rgba(255,255,255,.07);color:#fff}
+.nav-item .caret{width:12px;height:12px;stroke-width:1.6;margin-left:-2px;transition:transform .15s}
+.nav-item.open .caret{transform:rotate(180deg)}
+.topbar .who{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:.88rem;color:var(--ink-3);
+  white-space:nowrap}
+.topbar .who b{color:var(--ink);font-weight:600}
+
+/* the Masters panel */
+.mm-scrim{position:fixed;inset:0;z-index:-3;background:rgba(2,6,13,.55)}
+.mm-panel{position:absolute;left:0;right:0;top:100%;max-height:min(80vh,760px);overflow-y:auto;
+  background:linear-gradient(180deg,#0A1525,#08111F);border-bottom:1px solid var(--line-2);
+  box-shadow:0 40px 70px -30px rgba(0,0,0,.85);animation:mm-in .14s ease-out}
+@keyframes mm-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.mm-inner{display:grid;grid-template-columns:250px minmax(0,1fr);gap:30px;padding:24px 34px 30px;max-width:1560px}
+.mm-upload{display:flex;flex-direction:column;gap:6px;align-self:start;padding:16px 18px;border-radius:14px;
+  text-decoration:none;border:1px solid rgba(255,181,71,.32);
+  background:linear-gradient(160deg,rgba(255,181,71,.13),rgba(255,138,61,.04))}
+.mm-upload b{font:600 1.12rem/1.25 var(--display);color:var(--sun)}
+.mm-upload span{color:var(--ink-2);font-size:.88rem;line-height:1.45}
+.mm-upload:hover{border-color:rgba(255,181,71,.6)}
+.mm-upload.active{box-shadow:inset 3px 0 0 var(--sun)}
+.mm-grid{column-width:190px;column-gap:28px}
+.mm-group{break-inside:avoid;margin-bottom:20px}
+.mm-group h3{font:600 .84rem var(--body);color:var(--ink-3);padding:0 10px 6px;margin-bottom:2px;
+  border-bottom:1px solid var(--line)}
+.mm-group ul{list-style:none;margin:0;padding:0}
+.mm-group a{display:block;padding:6px 10px;border-radius:8px;color:var(--ink-2);text-decoration:none;
+  font-size:.95rem;line-height:1.3}
+.mm-group a small{display:block;font:.72rem var(--mono);color:var(--ink-3);margin-top:1px}
+.mm-group a:hover{background:rgba(255,255,255,.05);color:var(--ink)}
+.mm-group a.active{color:#fff;background:rgba(43,212,200,.12);box-shadow:inset 2px 0 0 var(--cyan)}
 main{min-width:0}
 .page{padding:32px 34px 80px;max-width:1560px}
 
@@ -232,18 +269,8 @@ summary{cursor:pointer;color:var(--cyan-2);font-weight:500;margin-bottom:10px}
 .signin-card .btn{margin-top:20px;padding:12px}
 
 /* ------------------------------------------------------------ masters */
-.masters{display:grid;grid-template-columns:200px minmax(0,1fr);align-items:start;min-height:100vh}
-.rail{position:sticky;top:0;max-height:100vh;overflow-y:auto;padding:30px 10px 40px 14px;
-  border-right:1px solid var(--line);background:rgba(2,6,13,.35)}
-.rail-group{margin-bottom:18px}
-.rail-head{font-size:.82rem;color:var(--ink-3);font-weight:600;padding:0 10px 6px}
-.rail a{display:block;padding:6px 10px;border-radius:8px;color:var(--ink-2);text-decoration:none;font-size:.94rem}
-.rail a:hover{background:rgba(255,255,255,.05);color:var(--ink)}
-.rail a.active{color:#fff;background:rgba(43,212,200,.12);box-shadow:inset 2px 0 0 var(--cyan)}
-.rail a.tool{color:var(--sun)}
-.rail a.tool.active{background:var(--warn-soft);box-shadow:inset 2px 0 0 var(--sun)}
-.rail-toggle{display:none}
-.master-pane{min-width:0}
+.crumb{margin:0 0 10px;font-size:.88rem;color:var(--ink-3)}
+.crumb span{padding:0 6px;opacity:.6}
 .tablename{font-family:var(--mono);font-size:.82rem;color:var(--ink-3);margin-top:8px}
 .path{list-style:none;display:flex;flex-wrap:wrap;margin:-10px 0 18px;padding:0;font-size:.88rem}
 .path li{color:var(--ink-3)}
@@ -252,6 +279,9 @@ summary{cursor:pointer;color:var(--cyan-2);font-weight:500;margin-bottom:10px}
 .toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:6px 0 4px}
 .toolbar>input[type=search]{flex:1 1 220px;max-width:300px}
 .toolbar .filter{min-width:150px;max-width:240px;flex:0 1 200px}
+.toolbar .filter.narrow{min-width:96px;max-width:120px;flex:0 1 110px}
+/* typed filters and drop-downs the same height, so their labels line up */
+.toolbar .filter input,.toolbar .filter select{height:42px}
 .toolbar-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 .editor{border-color:rgba(98,230,242,.35);box-shadow:0 0 0 1px rgba(98,230,242,.08),0 30px 60px -40px var(--glow);margin-top:16px}
 .editor label>span{display:flex;gap:3px}
@@ -287,23 +317,16 @@ td.row-actions>div{display:inline-flex;gap:6px}
 .fx-out b{font:600 1.6rem var(--display)}
 .fx-out{display:flex;flex-direction:column}
 
+@media (max-width:1180px){
+  .topbar .who>span{display:none}
+}
 @media (max-width:980px){
-  .app{grid-template-columns:minmax(0,1fr)}
-  .side{position:sticky;top:0;z-index:30;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;
-    padding:10px 12px;background:rgba(2,6,13,.88);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-    border-right:0;border-bottom:1px solid var(--line)}
-  .side::after{display:none}
-  .brand{padding:0 8px 0 4px;width:100%;margin-bottom:6px}
-  .side a{padding:7px 11px}
-  .side .grow{display:none}
-  .side .who{border:0;padding:0;margin-left:auto}
-  .side .who b,.side .who span{display:none}
-  .side .who .btn{margin:0;width:auto}
+  .topbar{flex-wrap:wrap;gap:8px 14px;padding:10px 18px}
+  .nav{order:3;width:100%;overflow-x:auto;scrollbar-width:none;margin:0 -6px}
+  .nav::-webkit-scrollbar{display:none}
+  .mm-inner{grid-template-columns:minmax(0,1fr);gap:18px;padding:18px 18px 24px}
+  .mm-panel{max-height:calc(100vh - 120px)}
   .page{padding:24px 18px 70px}
-  .masters{grid-template-columns:minmax(0,1fr)}
-  .rail-toggle{display:inline-flex;margin:16px 18px 0}
-  .rail{display:none;position:static;max-height:none;border-right:0;border-bottom:1px solid var(--line);padding:14px 18px}
-  .rail.open{display:block}
   .fx{grid-template-columns:1fr}
   .fx-convert{border-left:0;padding-left:0}
   .toolbar-actions{margin-left:0}
@@ -312,7 +335,9 @@ td.row-actions>div{display:inline-flex;gap:6px}
   .readout{grid-template-columns:1fr}
   .readout>div{border-left:0;border-top:1px solid var(--line)}
   .readout>div:first-child{border-top:0}
-  .side a span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .nav-item{padding:7px 10px;gap:7px}
+  .nav-item>svg:first-child{display:none}       /* all four fit on a phone without scrolling */
+  .brand small{display:none}
   .card .grid2{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

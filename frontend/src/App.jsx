@@ -7,6 +7,7 @@ import Batches from './pages/Batches.jsx'
 import BatchDetail from './pages/BatchDetail.jsx'
 import Distributors from './pages/Distributors.jsx'
 import Masters from './pages/masters/Masters.jsx'
+import MastersMenu from './MastersMenu.jsx'
 
 const I = {
   convert: <path d="M4 7h11l-3-3M20 17H9l3 3" />,
@@ -42,17 +43,18 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="side">
+      <header className="topbar">
         <div className="brand"><span className="mark" aria-hidden="true" />
           <div><b>Distributor sales</b><small>Aequm sales desk</small></div></div>
-        <NavLink to="/" end><Icon d={I.convert} /><span>Convert</span></NavLink>
-        <NavLink to="/batches"><Icon d={I.batches} /><span>Batches</span></NavLink>
-        <NavLink to="/distributors"><Icon d={I.rules} /><span>Rules</span></NavLink>
-        <NavLink to="/masters"><Icon d={I.masters} /><span>Masters</span></NavLink>
-        <div className="grow" />
-        <div className="who"><span>Signed in as</span><b>{who}</b>
+        <nav className="nav" aria-label="Main">
+          <NavLink className="nav-item" to="/" end><Icon d={I.convert} /><span>Convert</span></NavLink>
+          <NavLink className="nav-item" to="/batches"><Icon d={I.batches} /><span>Batches</span></NavLink>
+          <NavLink className="nav-item" to="/distributors"><Icon d={I.rules} /><span>Rules</span></NavLink>
+          <MastersMenu icon={<Icon d={I.masters} />} />
+        </nav>
+        <div className="who"><span>Signed in as <b>{who}</b></span>
           <button className="btn sm" onClick={signOut}>Sign out</button></div>
-      </aside>
+      </header>
       <main>
         <Routes>
           <Route path="/" element={<Upload />} />

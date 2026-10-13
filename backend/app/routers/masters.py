@@ -7,8 +7,7 @@
     PUT    /api/masters/{slug}/{id}             change
     DELETE /api/masters/{slug}/{id}             remove, refused while anything points at it
     POST   /api/masters/{slug}/delete-many      remove several
-    POST   /api/masters/{slug}/bulk             alignment: one row per SKU of a group
-    POST   /api/masters/{slug}/copy-year        alignment: last year's rows into this year
+    POST   /api/masters/{slug}/copy-year        a year-bound master: last year's rows into this year
     POST   /api/masters/upload                  Excel/CSV into any master(s): check, then import
     GET    /api/masters/{slug}/export           one master as .xlsx (also the upload template)
     GET    /api/masters/export-all              every master, one sheet each
@@ -240,6 +239,9 @@ def _filtered(spec: Spec, sel, params):
             sel = spec.option_filters[k](sel, v)
             continue
         f = next((x for x in spec.fields if x.name == k), None)
+        if f and f.type == "text" and k in spec.filters:      # e.g. Sales by DIST_NAME
+            sel = sel.where(func.upper(_col(spec, k)) == str(v).strip().upper())
+            continue
         if f and f.type in ("ref", "int", "select", "bool", "code"):
             try:
                 val = int(v) if f.type in ("ref", "int", "bool") else str(v).upper() \
@@ -391,49 +393,6 @@ def delete_many(slug: str, body: dict = Body(...), db: Session = Depends(get_db)
         db.rollback()
         raise
     return {"deleted": len(ids)}
-
-
-@router.post("/masters/{slug}/bulk")
-def bulk(slug: str, body: dict = Body(...), db: Session = Depends(get_db)):
-    """Assign every active SKU of a product group (or one brand of it) in one go.
-    Rows that already exist are left alone and counted as skipped."""
-    spec = S.get(slug)
-    if not spec.bulk_by_sku:
-        bad("This master is not kept at SKU level.")
-    pg = body.get("product_group_id")
-    if not pg:
-        bad("Choose a product group.")
-    P = X.ProductMaster
-    sel = S._sku_by_group(select(P.id), pg).where(P.active == 1)
-    if body.get("brand_id"):
-        sel = sel.where(P.product_brand_id == int(body["brand_id"]))
-    if body.get("sku_ids"):
-        sel = sel.where(P.id.in_([int(i) for i in body["sku_ids"]]))
-    skus = db.execute(sel.order_by(P.sap_product_name)).scalars().all()
-    if not skus:
-        bad("That product group has no active products to assign. A product belongs to the "
-            "group whose Master ID is its PRODUCT_GROUP_ID.")
-    created = skipped = 0
-    try:
-        for sid in skus:
-            obj = spec.model()
-            obj.id = None
-            _apply(db, spec, obj, {**body, "sku_id": sid}, creating=True)
-            if spec.validate:
-                spec.validate(db, obj)          # a bad team or year stops the lot
-            try:
-                _check_unique(db, spec, obj)
-            except HTTPException:
-                skipped += 1
-                continue
-            db.add(obj)
-            db.flush()
-            created += 1
-        db.commit()
-    except HTTPException:
-        db.rollback()
-        raise
-    return {"created": created, "skipped": skipped, "skus": len(skus)}
 
 
 @router.post("/masters/{slug}/copy-year")

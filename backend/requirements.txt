@@ -10,3 +10,4 @@ xlrd==2.0.1
 httpx
 pytest
 xlwt
+python-calamine==0.8.2

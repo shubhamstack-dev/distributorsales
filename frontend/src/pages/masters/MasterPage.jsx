@@ -14,8 +14,10 @@ const PATHS = {
   brand: ['Product group', 'Brand'], sku: ['Product group', 'Brand', 'Product'],
   customer: ['Zone', 'HQ', 'Territory', 'Customer'],
   product_reporting_sku: ['Reporting line (P1 / P2 / X)', 'SKU'],
-  customer_assignment: ['Year', 'Customer', 'Territory + Team', 'Product group', 'SKU'],
-  employee_assignment: ['Year', 'Employee', 'Territory', 'Product group', 'SKU'],
+  customer_terr_assignment: ['Customer', 'Product group', 'Territory, HQ + Team'],
+  customer_pg_assignment: ['Customer', 'Product group', 'Brand', 'Product'],
+  employee_terr_assignment: ['Employee', 'HQ', 'Territory'],
+  employee_pg_assignment: ['Employee', 'Product group', 'Brand', 'Product'],
 }
 
 /** "Territories" -> "territory", "Team › Product groups" -> "product group", "SKUs" -> "SKU". */
@@ -135,12 +137,32 @@ function Input({ f, form, set, spec, row }) {
   )
 }
 
+/** A typed-in filter (a year, a distributor's name): applied once typing
+ *  pauses, so a year is not looked up digit by digit. */
+function TypedFilter({ f, value, onChange }) {
+  const [v, setV] = useState(value)
+  useEffect(() => { setV(value) }, [value])
+  useEffect(() => {
+    if (String(v) === String(value)) return undefined
+    const t = setTimeout(() => onChange(String(v).trim()), 450)
+    return () => clearTimeout(t)
+  }, [v]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input type={f.type === 'int' ? 'number' : 'search'} value={v} placeholder="All"
+           inputMode={f.type === 'int' ? 'numeric' : undefined}
+           onChange={(e) => setV(e.target.value)}
+           onKeyDown={(e) => { if (e.key === 'Enter') onChange(String(v).trim()) }} />
+  )
+}
+
 export default function MasterPage({ spec }) {
   const refFields = spec.fields.filter((f) => f.type === 'ref')
   const hasYear = refFields.some((f) => f.name === 'year_id')
   const hasActive = spec.fields.some((f) => f.name === 'active')
-  const filterFields = useMemo(() => [...refFields]
-    .sort((a, b) => (b.name === 'year_id') - (a.name === 'year_id')).slice(0, 4),
+  // the spec names its filters (Sales: year, month, distributor …); else the first four refs
+  const filterFields = useMemo(() => (spec.filters?.length
+    ? spec.filters.map((n) => spec.fields.find((f) => f.name === n)).filter(Boolean)
+    : [...refFields].sort((a, b) => (b.name === 'year_id') - (a.name === 'year_id')).slice(0, 4)),
   [spec.slug]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [filters, setFilters] = useState({})
@@ -149,7 +171,7 @@ export default function MasterPage({ spec }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState({ rows: [], total: 0 })
   const [sel, setSel] = useState(new Set())
-  const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'bulk' | 'copy'
+  const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'upload' | 'copy'
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({})
   const [msg, setMsg] = useState(null)
@@ -190,7 +212,6 @@ export default function MasterPage({ spec }) {
     }
     setEditing(row); setForm(f); setMode('edit'); setMsg(null)
   }
-  function openBulk() { setForm(blankForm(spec, filters)); setMode('bulk'); setMsg(null) }
   function openCopy() { setForm({ to_year_id: filters.year_id || null }); setMode('copy'); setMsg(null) }
   const close = () => { setMode(null); setEditing(null); setReport(null) }
 
@@ -226,13 +247,6 @@ export default function MasterPage({ spec }) {
     }
   }) }
 
-  const bulk = (e) => { e.preventDefault(); run(async () => {
-    const r = await api.masterBulk(spec.slug, { ...toBody(spec, form, ['sku_id']), brand_id: form.brand_id || null })
-    forgetOptions(); load()
-    say(`Assigned ${r.created} SKU${r.created === 1 ? '' : 's'}` +
-        (r.skipped ? `; ${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already assigned and left as they were.` : '.'))
-  }) }
-
   const copy = (e) => { e.preventDefault(); run(async () => {
     const r = await api.masterCopyYear(spec.slug, form)
     forgetOptions(); load()
@@ -262,6 +276,7 @@ export default function MasterPage({ spec }) {
     <div className="page master">
       <div className="head">
         <div>
+          <p className="crumb">Masters <span aria-hidden="true">/</span> {spec.group}</p>
           <h1>{spec.title}</h1>
           {spec.table === spec.table.toUpperCase() && <div className="tablename">Table {spec.table}</div>}
           {spec.description && <p className="lead">{spec.description}</p>}
@@ -281,10 +296,17 @@ export default function MasterPage({ spec }) {
                  onChange={(e) => { setPage(1); setQ(e.target.value) }} aria-label="Search" />
         )}
         {filterFields.map((f) => (
-          <label key={f.name} className="filter">
+          <label key={f.name} className={`filter${f.type === 'int' ? ' narrow' : ''}`}>
             <span>{f.label}</span>
-            <RefSelect slug={f.ref} value={filters[f.name] || null} blank="All" keyBy={f.key}
-                       includeInactive onChange={(v) => setFilter(f.name, v)} />
+            {f.type === 'ref'
+              ? <RefSelect slug={f.ref} value={filters[f.name] || null} blank="All" keyBy={f.key}
+                           includeInactive onChange={(v) => setFilter(f.name, v)} />
+              : f.type === 'select'
+                ? <select value={filters[f.name] ?? ''} onChange={(e) => setFilter(f.name, e.target.value)}>
+                    <option value="">All</option>
+                    {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                : <TypedFilter f={f} value={filters[f.name] ?? ''} onChange={(v) => setFilter(f.name, v)} />}
           </label>
         ))}
         {hasActive && (
@@ -300,7 +322,6 @@ export default function MasterPage({ spec }) {
           <button className="btn" onClick={() => api.masterExport(spec.slug).catch((e) => say(e.message, true))}>
             Download Excel</button>
           {spec.year_bound && <button className="btn" onClick={openCopy}>Copy from a year</button>}
-          {spec.bulk_by_sku && <button className="btn" onClick={openBulk}>Assign a whole group</button>}
           <button className="btn primary" onClick={openAdd}>Add {singular(spec.title)}</button>
         </div>
       </div>
@@ -329,27 +350,6 @@ export default function MasterPage({ spec }) {
             <button type="button" className="btn" onClick={close}>Close</button>
           </div>
         </section>
-      )}
-
-      {mode === 'bulk' && (
-        <form className="panel editor" onSubmit={bulk}>
-          <h3>Assign every product of a group</h3>
-          <p className="fine">One row is added per active product. Products already assigned are left as they are.
-            Narrow it to one brand if only part of the group applies.</p>
-          <div className="grid2">
-            {editable(spec).filter((f) => f.name !== 'sku_id')
-              .map((f) => <Input key={f.name} f={f} form={form} set={set} spec={spec} />)}
-            <label htmlFor="f-brand"><span>Only this brand</span>
-              <RefSelect id="f-brand" slug="brand" value={form.brand_id || null} blank="Every brand"
-                         params={{ product_group_id: form.product_group_id }}
-                         waitingFor={!form.product_group_id ? 'product group' : null}
-                         onChange={(v) => setForm((f) => ({ ...f, brand_id: v }))} /></label>
-          </div>
-          <div className="actions">
-            <button className="btn primary" disabled={busy}>Assign products</button>
-            <button type="button" className="btn" onClick={close}>Close</button>
-          </div>
-        </form>
       )}
 
       {mode === 'copy' && (

@@ -33,11 +33,11 @@ export default function MasterUpload({ meta }) {
   return (
     <div className="page">
       <div className="head">
-        <div><h1>Upload master data</h1>
-          <p className="lead">Send MASTER DATA &amp; TABLES.xlsx as it is, or a file per master. Each
-            sheet is read into the master it is named after, parents first, so zones go in before
-            headquarters and brands before products. Uploading again updates the same rows; nothing
-            is ever deleted.</p></div>
+        <div><p className="crumb">Masters</p><h1>Upload master data</h1>
+          <p className="lead">Send MASTER DATA &amp; TABLES.xlsx as it is, the sales, budget and
+            assignment workbook as it is, or a file per table. Each sheet is read into the table it
+            is named after, parents first, so zones go in before headquarters and brands before
+            products. Uploading again updates the same rows; nothing is ever deleted.</p></div>
         <div className="actions">
           <button className="btn" onClick={() => api.masterExportAll().catch((e) => setErr(e.message))}>
             Download every master</button>
@@ -52,14 +52,16 @@ export default function MasterUpload({ meta }) {
              onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
              onDrop={(e) => { e.preventDefault(); setOver(false); choose(e.dataTransfer.files) }}>
           <b>{files.length ? files.map((f) => f.name).join(', ') : 'Drop Excel or CSV files here, or click to choose'}</b>
-          <span>Sheets are matched by name: {excel.map((m) => m.table).join(', ')}, and the old
-            system's ZONE, HQ_MASTER, TERRITORY, PRODUCT_MASTER_GROUP, TEAM, ROLE_MASTER and
-            DESIGNATION. Every other master goes by its title, e.g. Years or Countries.</span>
+          <span>Sheets are matched by table name: {excel.map((m) => m.table).join(', ')}
+            (BUDGET_MASTER_TEST_NEW is read as BUDGET_MASTER), and the old system's ZONE, HQ_MASTER,
+            TERRITORY, PRODUCT_MASTER_GROUP, TEAM, ROLE_MASTER and DESIGNATION. Every other master
+            goes by its title, e.g. Years or Countries.</span>
           <input ref={pick} type="file" multiple hidden accept=".xlsx,.xlsm,.csv,.txt"
                  onChange={(e) => { choose(e.target.files); e.target.value = '' }} />
         </div>
         {busy && <div className="prog"><div className="bar"><i style={{ width: `${Math.round(progress * 100)}%` }} /></div>
-          <span>{progress < 1 ? `Uploading, ${Math.round(progress * 100)}%` : busy}</span></div>}
+          <span>{progress < 1 ? `Uploading, ${Math.round(progress * 100)}%`
+            : `${busy} A workbook of 100,000 sales rows takes about half a minute.`}</span></div>}
       </section>
 
       <section className="panel">

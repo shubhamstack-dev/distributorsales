@@ -103,7 +103,6 @@ export const api = {
   masterUpdate: (slug, id, body) => call('PUT', `/api/masters/${slug}/${id}`, body),
   masterDelete: (slug, id) => call('DELETE', `/api/masters/${slug}/${id}`),
   masterDeleteMany: (slug, ids) => call('POST', `/api/masters/${slug}/delete-many`, { ids }),
-  masterBulk: (slug, body) => call('POST', `/api/masters/${slug}/bulk`, body),
   masterCopyYear: (slug, body) => call('POST', `/api/masters/${slug}/copy-year`, body),
   masterUpload: (files, dryRun, slug, onProgress) => {
     const fd = new FormData()

@@ -72,7 +72,9 @@ def test_every_master_is_described(h):
             "zone", "headquarter", "territory", "product_group", "brand", "sku",
             "product_reporting", "product_reporting_sku", "customer", "designation", "role",
             "team", "team_product_group", "team_headquarter", "employee",
-            "customer_assignment", "employee_assignment"} <= slugs
+            "customer_terr_assignment", "customer_pg_assignment", "employee_terr_assignment",
+            "employee_pg_assignment"} <= slugs
+    assert not {"customer_assignment", "employee_assignment"} & slugs     # removed
 
 
 def test_labels_come_back_with_references(h, world):
@@ -251,59 +253,12 @@ def test_an_employee_cannot_report_in_a_circle(h, world):
                   json={"reporting_manager_id": world["emp"]["id"]}, headers=h), 422, "circle")
 
 
-# =============================================================== alignment
-def _ca(world, **over):
-    return {"year_id": world["y26"]["id"], "customer_id": world["cust"]["id"],
-            "territory_id": world["terr"]["id"], "team_id": world["team"]["id"],
-            "product_group_id": world["pg"]["id"], "sku_id": world["sku1"]["id"], **over}
-
-
-def test_customer_sku_must_be_in_the_group(h, world):
-    refused(c.post("/api/masters/customer_assignment",
-                   json=_ca(world, sku_id=world["sku3"]["id"]), headers=h), 422, "not in the product group")
-
-
-def test_customer_team_must_carry_the_group(h, world):
-    refused(c.post("/api/masters/customer_assignment",
-                   json=_ca(world, product_group_id=world["pg2"]["id"], sku_id=world["sku3"]["id"]),
-                   headers=h), 422, "does not carry")
-
-
-def test_customer_team_must_cover_the_territory_hq(h, world):
-    refused(c.post("/api/masters/customer_assignment",
-                   json=_ca(world, territory_id=world["terr2"]["id"]), headers=h), 422, "Pokhara")
-
-
-def test_customer_alignment_in_bulk_by_product_group(h, world):
-    body = {k: v for k, v in _ca(world).items() if k != "sku_id"}
-    r = ok(c.post("/api/masters/customer_assignment/bulk", json=body, headers=h))
-    assert r == {"created": 2, "skipped": 0, "skus": 2}
-    r = ok(c.post("/api/masters/customer_assignment/bulk", json=body, headers=h))
-    assert r == {"created": 0, "skipped": 2, "skus": 2}           # nothing twice
-    got = rows(h, "customer_assignment", customer_id=world["cust"]["id"])
-    assert got["total"] == 2 and "ATORVA" in got["rows"][0]["sku_id__label"]
-
-
-def test_employee_alignment_in_bulk(h, world):
-    body = {"year_id": world["y26"]["id"], "employee_id": world["emp"]["id"],
-            "territory_id": world["terr"]["id"], "product_group_id": world["pg"]["id"],
-            "brand_id": world["br"]["id"]}
-    assert ok(c.post("/api/masters/employee_assignment/bulk", json=body, headers=h))["created"] == 2
-    # the employee's team does not carry Gastro
-    refused(c.post("/api/masters/employee_assignment/bulk",
-                   json={**body, "product_group_id": world["pg2"]["id"], "brand_id": None},
-                   headers=h), 422, "does not carry")
-
-
 def test_a_year_can_start_from_the_one_before(h, world):
     y26, y27 = world["y26"]["id"], world["y27"]["id"]
     for slug in ("team_product_group", "team_headquarter"):
         r = ok(c.post(f"/api/masters/{slug}/copy-year",
                       json={"from_year_id": y26, "to_year_id": y27}, headers=h))
         assert r["created"] == 1
-    r = ok(c.post("/api/masters/customer_assignment/copy-year",
-                  json={"from_year_id": y26, "to_year_id": y27}, headers=h))
-    assert r["created"] == 2 and r["skipped"] == 0
     r = ok(c.post("/api/masters/product_reporting/copy-year",
                   json={"from_year_id": y26, "to_year_id": y27}, headers=h))
     assert r["created"] == 2

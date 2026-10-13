@@ -27,8 +27,9 @@ Two settings are not optional:
 
 ## The screens
 
-Dark, in the look of atomsolar.in: a sidebar with Convert, Batches, Rules and
-Masters. **Convert** shows the Month, Year and Mid Month every row will carry
+Dark, in the look of atomsolar.in: a bar across the top with Convert, Batches,
+Rules and Masters. **Masters** opens one panel under the bar listing every
+master by group, so each screen has the full width (no second rail down the side). **Convert** shows the Month, Year and Mid Month every row will carry
 before anything is converted. Fonts are Fraunces, Mukta and Michroma from
 Google Fonts, with system fallbacks if they cannot load.
 
@@ -232,7 +233,8 @@ totals checked at each step. The suite asserts the numbers this replaced:
 
 ## Master data
 
-The **Masters** screen holds the structure sales are reported against:
+**Masters** (the menu in the top bar) holds the structure sales are reported
+against, and the sales and budget figures themselves:
 
 | Group | Masters |
 |---|---|
@@ -241,7 +243,8 @@ The **Masters** screen holds the structure sales are reported against:
 | Products | Product groups, **Brands** (`PRODUCT_MASTER_BRAND`), **Products** (`PRODUCT_MASTER`), Product reporting (P1 / P2 / X), Product reporting › SKUs |
 | Customers | **Customers** (`CUSTOMER_MASTER`) |
 | People | Designations, Roles, Teams, Team › Product groups, Team › Headquarters, **Employees** (`EMPLOYEE_MASTER`) |
-| Alignment | Customer alignment, Employee alignment (both at product level) |
+| Assignment | **Customer territory assignment** (`CUSTOMER_TERR_ASSIGNMENT`), **Customer product assignment** (`CUSTOMER_PG_ASSIGNMENT`), **Employee territory assignment** (`EMPLOYEE_TERR_ASSIGNMENT`), **Employee product assignment** (`EMPLOYEE_PG_ASSIGNMENT`) |
+| Sales & budget | **Sales** (`MAPPING_MASTER`), **Mid sales** (`MAPPING_MASTER_MID`), **Budget** (`BUDGET_MASTER`) |
 
 ### The tables of MASTER DATA & TABLES.xlsx
 
@@ -267,6 +270,43 @@ They replace the earlier `md_customer`, `md_sku`, `md_brand` and `md_employee`.
 * `REPORTING_MANAGER_ID` equal to the employee's own ID marks the top of the
   tree, as the workbook does; a real circle is refused.
 
+### Sales, budget and the assignment tables (Book1.xlsx)
+
+Seven tables of the old system, **with its table and column names exactly**,
+uploaded from one workbook on *Upload master data* (or each from its own screen):
+
+| Screen | Table | A row is found again by |
+|---|---|---|
+| Sales | `MAPPING_MASTER` (33 columns) | `ID` |
+| Mid sales | `MAPPING_MASTER_MID` (34: the same plus `MID`) | `ID` |
+| Budget | `BUDGET_MASTER` (120 + this app's `ID`); the sheet `BUDGET_MASTER_TEST_NEW` is read into it | `S_NO` + `EMPLOYEE_ID` + `HQ_ID` |
+| Customer territory assignment | `CUSTOMER_TERR_ASSIGNMENT` | every column |
+| Customer product assignment | `CUSTOMER_PG_ASSIGNMENT` | every column |
+| Employee territory assignment | `EMPLOYEE_TERR_ASSIGNMENT` | every column |
+| Employee product assignment | `EMPLOYEE_PG_ASSIGNMENT` | every column |
+
+* **Uploading the same file twice adds nothing**; a changed row is updated in
+  place; nothing is deleted. `S_NO` repeats in the budget (one per budget line,
+  shared by each HQ and employee it is split over), which is why the budget is
+  keyed on three columns.
+* **Read in bulk** (`services/bulk_load.py`), not row by row: the 156,941 rows
+  of Book1.xlsx are checked in about 10 s and imported in about 15 s. Workbooks
+  are read with `python-calamine` (4 s for this one, against 36 s with openpyxl,
+  which is still the fallback).
+* **Numbers are DOUBLE**, so `1.25415` comes back as `1.25415`. `INVOICE_NO` is
+  text, since it holds both `83038554` and `ABP77-00629`.
+* **IDs are the masters' own** (`PRODUCT_ID`, `CUSTOMER_ID`, `EMPLOYEE_ID`, …;
+  `HQ_ID`, `TERRITORY_ID`, `PRODUCT_GROUP_ID`, `TEAM_ID` are Master IDs) and
+  the screens show the name beside each. An ID not in the masters is kept, not
+  refused — old sales name old products — and the upload lists them once.
+* **Filters** above each list: Sales by year, month, distributor, HQ and group;
+  Budget by year, employee, HQ and group.
+* **Download Excel** on each screen writes the table back with its own column
+  names (Sales: about 20 s for 100,000 rows). *Download every master* leaves
+  these seven out; they are data, not masters, and would make it very large.
+* nginx allows 10 minutes per request for these uploads and downloads. A proxy
+  in front of it (the host's own nginx, Cloudflare …) needs as long.
+
 ### Uploading master data
 
 **Masters › Upload master data** takes MASTER DATA & TABLES.xlsx as it is, or
@@ -290,7 +330,7 @@ any workbook / CSV per master. Every master can be uploaded, the same way:
 `POST /api/masters/upload` (files, `dry_run`, optional `slug`),
 `GET /api/masters/{slug}/export`, `GET /api/masters/export-all`.
 
-**Structure is permanent; alignment is per year.** *Copy from a year* starts a
+**Structure is permanent; assignment is per year.** *Copy from a year* starts a
 new year from the old one. A customer's product can only be assigned to a team
 that carries its product group and covers its territory's HQ that year.
 
@@ -303,7 +343,7 @@ the upload are all drawn from it.
 
 **Upgrading an existing database** needs nothing by hand: on startup the API
 creates the new tables, adds the new columns, gives existing parents a Master
-ID and repoints the alignment keys. The old `md_customer` / `md_sku` /
+ID and repoints the assignment keys. The old `md_customer` / `md_sku` /
 `md_brand` / `md_employee` / alias tables are left in place unused; see
 `migrations/003_master_data_tables.sql` to drop them once the masters are
 uploaded again.
