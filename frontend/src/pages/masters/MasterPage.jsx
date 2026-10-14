@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../api.js'
 import RefSelect, { forgetOptions } from './RefSelect.jsx'
 import CurrencyTool from './CurrencyTool.jsx'
 import UploadReport from './UploadReport.jsx'
 import { menuOf } from './meta.js'
+import AssignPanel, { checkThenRun } from './AssignPanel.jsx'
 
 const SIZE = 50
 
@@ -167,7 +169,8 @@ export default function MasterPage({ spec }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState({ rows: [], total: 0 })
   const [sel, setSel] = useState(new Set())
-  const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'upload'
+  const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'upload' | 'assign'
+  const isTph = spec.slug === 'team_pg_hq'        // Team PG HQ has the old "Team Hq Pg" form too
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({})
   const [msg, setMsg] = useState(null)
@@ -233,6 +236,12 @@ export default function MasterPage({ spec }) {
     }
   }) }
 
+  const cleanTph = () => run(async () => {
+    const r = await checkThenRun('team_pg_hq', 'clean', { team_ids: filters.team_id ? [filters.team_id] : [] },
+      filters.team_id ? "delete this team's rows" : 'delete every Team PG HQ row')
+    if (r) { say(r.text, !r.done); if (r.done) load() }
+  })
+
   const remove = (row) => {
     if (!window.confirm(`Delete ${row.__label?.startsWith('#') ? 'this row' : row.__label}?`)) return
     run(async () => { await api.masterDelete(spec.slug, row.id); forgetOptions(); say('Deleted.'); load() })
@@ -254,8 +263,12 @@ export default function MasterPage({ spec }) {
     <div className="page master">
       <div className="head">
         <div>
-          <p className="crumb">{menuOf(spec.group)}{menuOf(spec.group) !== spec.group &&
-            <><span aria-hidden="true">/</span>{spec.group}</>}</p>
+          {spec.group === 'Assignment tables'
+            ? <p className="crumb">Assignment<span aria-hidden="true">/</span>
+                <Link to={`/masters/terr-pg/${spec.slug.split('_')[0]}`}>
+                  {spec.slug.startsWith('customer') ? 'Customer' : 'Employee'} Terr-PG</Link></p>
+            : <p className="crumb">{menuOf(spec.group)}{menuOf(spec.group) !== spec.group &&
+                <><span aria-hidden="true">/</span>{spec.group}</>}</p>}
           <h1>{spec.title}</h1>
           {spec.table === spec.table.toUpperCase() && <div className="tablename">Table {spec.table}</div>}
           {spec.description && <p className="lead">{spec.description}</p>}
@@ -295,6 +308,11 @@ export default function MasterPage({ spec }) {
             </select></label>
         )}
         <div className="toolbar-actions">
+          {isTph && <>
+            <button className="btn" onClick={() => setMode(mode === 'assign' ? null : 'assign')}>Add Team Hq Pg</button>
+            <button className="btn danger" disabled={busy} onClick={cleanTph}>
+              {filters.team_id ? "Delete this team's rows" : 'Delete all'}</button>
+          </>}
           <button className="btn" onClick={() => filePick.current?.click()} disabled={busy}>Upload Excel</button>
           <input ref={filePick} type="file" hidden accept=".xlsx,.xlsm,.csv"
                  onChange={(e) => { const l = [...e.target.files]; e.target.value = ''; setUpFiles(l); upload(true, l) }} />
@@ -329,6 +347,8 @@ export default function MasterPage({ spec }) {
           </div>
         </section>
       )}
+
+      {mode === 'assign' && <AssignPanel kind="team_pg_hq" onDone={load} onClose={() => setMode(null)} />}
 
       <div className="listbar">
         <span className="muted">{data.total.toLocaleString('en-IN')} row{data.total === 1 ? '' : 's'}</span>

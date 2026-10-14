@@ -586,7 +586,10 @@ SPECS: list[Spec] = [
 # ===================================================== the old system's layout
 # Each screen as the old Abbott application had it: its name, the menu column it
 # sits in (Administration: Organisation structure, Product, Master data, Others;
-# then Assignment, Budgeting, Sales) and its list columns. The order here is the
+# then Assignment, Budgeting, Sales) and its list columns. "Assignment tables"
+# are the four *_ASSIGNMENT tables: the Assignment menu shows them joined, as
+# Customer Terr-PG and Employee Terr-PG (routers/terr_pg.py), and those pages
+# link to each table for adding and editing rows. The order here is the
 # menu's order; the order of SPECS above (parents first) is the upload's.
 def _cols(*cols):
     return [Col(label, path, primary) for label, path, *rest in cols for primary in [bool(rest)]]
@@ -643,24 +646,24 @@ LAYOUT = {
     "company_country": ("Company › Countries", "Others",
                         _cols(("Company", "company_id", 1), ("Country", "country_id"))),
     # ---------------------------------------------------------- Assignment
-    "customer_terr_assignment": ("Customer Territory", "Assignment",
-                                 _cols(("Customer Name", "customer_id", 1), ("HQ", "hq_id"),
-                                       ("Territory", "territory_id"),
-                                       ("Product Group", "product_group_id"), ("Team", "team_id"))),
-    "customer_pg_assignment": ("Customer Product", "Assignment",
-                               _cols(("Customer Name", "customer_id", 1),
-                                     ("Product Group", "product_group_id"),
-                                     ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
-    "employee_terr_assignment": ("Employee Territory", "Assignment",
-                                 _cols(("Employee Name", "employee_id", 1), ("HQ", "hq_id"),
-                                       ("Territory", "territory_id"))),
-    "employee_pg_assignment": ("Employee Product", "Assignment",
-                               _cols(("Employee Name", "employee_id", 1),
-                                     ("Product Group", "product_group_id"),
-                                     ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
     "team_pg_hq": ("Team PG HQ", "Assignment",
                    _cols(("Team", "team_id|team_name", 1), ("Product Group", "product_group_id|product_group_name"),
                          ("HQ", "hq_id|hq_name"))),
+    "customer_terr_assignment": ("Customer Terr-PG › Territory rows", "Assignment tables",
+                                 _cols(("Customer Name", "customer_id", 1), ("HQ", "hq_id"),
+                                       ("Territory", "territory_id"),
+                                       ("Product Group", "product_group_id"), ("Team", "team_id"))),
+    "customer_pg_assignment": ("Customer Terr-PG › Product rows", "Assignment tables",
+                               _cols(("Customer Name", "customer_id", 1),
+                                     ("Product Group", "product_group_id"),
+                                     ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
+    "employee_terr_assignment": ("Employee Terr-PG › Territory rows", "Assignment tables",
+                                 _cols(("Employee Name", "employee_id", 1), ("HQ", "hq_id"),
+                                       ("Territory", "territory_id"))),
+    "employee_pg_assignment": ("Employee Terr-PG › Product rows", "Assignment tables",
+                               _cols(("Employee Name", "employee_id", 1),
+                                     ("Product Group", "product_group_id"),
+                                     ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
     # ----------------------------------------------------- Budgeting, Sales
     "budget": ("Budget", "Budgeting", []),
     "sales": ("Sales", "Sales", []),

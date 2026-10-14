@@ -5,12 +5,16 @@ import { api } from '../../api.js'
 // opens one wide panel of four columns; the others are short lists.
 export const MENUS = [
   { label: 'Administration', groups: ['Organisation structure', 'Product', 'Master data', 'Others'], wide: true },
-  { label: 'Assignment', groups: ['Assignment'] },
+  // Customer / Employee Terr-PG join two tables each, so they are pages of their
+  // own; the four tables behind them ("Assignment tables") are reached from them.
+  { label: 'Assignment', groups: ['Assignment'], also: ['Assignment tables'],
+    links: [{ to: '/masters/terr-pg/customer', title: 'Customer Terr-PG' },
+            { to: '/masters/terr-pg/employee', title: 'Employee Terr-PG' }] },
   { label: 'Budgeting', groups: ['Budgeting'] },
   { label: 'Sales', groups: ['Sales'] },
 ]
 export const GROUPS = MENUS.flatMap((m) => m.groups)
-export const menuOf = (group) => MENUS.find((m) => m.groups.includes(group))?.label
+export const menuOf = (group) => MENUS.find((m) => m.groups.includes(group) || m.also?.includes(group))?.label
 
 // One request for the whole session: the top bar's menu and the master screens
 // both draw from it. A failed request is forgotten so the next try asks again.

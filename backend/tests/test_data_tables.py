@@ -174,9 +174,43 @@ def test_export_writes_the_workbook_columns_and_reads_back_in(h):
 
 def test_the_screens_are_listed_under_assignment_and_sales(h):
     meta = {m["slug"]: m for m in ok(c.get("/api/masters/meta", headers=h))}
-    assert [m["title"] for m in meta.values() if m["group"] == "Assignment"] == [
-        "Customer Territory", "Customer Product", "Employee Territory", "Employee Product",
-        "Team PG HQ"]
+    # the four tables sit behind the joined Terr-PG pages, not in the menu themselves
+    assert [m["title"] for m in meta.values() if m["group"] == "Assignment"] == ["Team PG HQ"]
+    assert [m["slug"] for m in meta.values() if m["group"] == "Assignment tables"] == [
+        "customer_terr_assignment", "customer_pg_assignment", "employee_terr_assignment",
+        "employee_pg_assignment"]
     assert not any(m["group"] == "Alignment" for m in meta.values())
     assert [meta[s]["title"] for s in ("sales", "mid_sales", "budget")] == ["Sales", "Mid sales", "Budget"]
     assert meta["sales"]["table"] == "MAPPING_MASTER" and meta["sales"]["filters"][0] == "year"
+
+
+# ------------------------------------------- Customer / Employee Terr-PG pages
+def test_customer_terr_pg_joins_on_customer_and_product_group(h):
+    r = ok(c.get("/api/terr-pg/customer", headers=h))
+    assert r["columns"] == ["Customer Name", "HQ", "Territory", "Product Group", "Team",
+                            "Product Brand", "Product"]
+    # both product rows of customer 1 are in group 1, covered by territory 3 / team 5;
+    # the group-2 territory row has no products and does not appear
+    assert r["total"] == 2
+    assert [(x[0], x[1], x[2], x[3], x[4], x[6]) for x in r["rows"]] == \
+        [(1, 3, 3, 1, 5, 31), (1, 3, 3, 1, 5, 49)]          # no masters here: IDs as given
+
+
+def test_employee_terr_pg_keeps_products_with_no_territory(h):
+    r = ok(c.get("/api/terr-pg/employee", headers=h))
+    assert r["columns"][:3] == ["Employee Name", "HQ", "Territory"]
+    assert r["total"] == 2 and all(x[1] is None and x[2] is None for x in r["rows"])
+
+
+def test_terr_pg_filters_names_and_downloads(h):
+    assert ok(c.get("/api/terr-pg/customer?team_id=1", headers=h))["total"] == 0
+    assert ok(c.get("/api/terr-pg/customer?product_group_id=1", headers=h))["total"] == 2
+    ok(c.post("/api/masters/customer", headers=h,
+              json={"id": 1, "customer_name": "HEALTH MEDECINE DISTRIBUTOR"}), 201)
+    r = ok(c.get("/api/terr-pg/customer?q=medecine", headers=h))
+    assert r["total"] == 2 and r["rows"][0][0] == "HEALTH MEDECINE DISTRIBUTOR"
+    res = c.get("/api/terr-pg/customer/export", headers=h)
+    rows = list(openpyxl.load_workbook(io.BytesIO(res.content), read_only=True).active
+                .iter_rows(values_only=True))
+    assert rows[0][:2] == ("S.No", "Customer Name") and len(rows) == 3
+    assert c.get("/api/terr-pg/nobody", headers=h).status_code == 404

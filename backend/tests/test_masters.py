@@ -268,7 +268,7 @@ def test_the_menu_follows_the_old_system(h):
     meta = ok(c.get("/api/masters/meta", headers=h))
     groups = list(dict.fromkeys(m["group"] for m in meta))
     assert groups == ["Organisation structure", "Product", "Master data", "Others",
-                      "Assignment", "Budgeting", "Sales"]
+                      "Assignment", "Assignment tables", "Budgeting", "Sales"]
     assert [m["title"] for m in meta if m["group"] == "Organisation structure"] == \
         ["Company", "Zone", "Head Quarter", "Territory"]
 

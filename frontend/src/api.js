@@ -112,6 +112,11 @@ export const api = {
   },
   masterExport: (slug) => save(`/api/masters/${slug}/export`, `${slug}.xlsx`),
   masterExportAll: () => save('/api/masters/export-all', 'MASTER_DATA.xlsx'),
+  // Customer / Employee Terr-PG: the two assignment tables of a kind, joined
+  // create / delete / assign all / clean on the assignment pages; dry_run only counts
+  assign: (kind, action, body) => call('POST', `/api/assign/${kind}/${action}`, body),
+  terrPg: (kind, params) => call('GET', `/api/terr-pg/${kind}?${qs(params)}`),
+  terrPgExport: (kind, params) => save(`/api/terr-pg/${kind}/export?${qs(params)}`, `${kind}-terr-pg.xlsx`),
   rate: (frm, to, on) => call('GET', `/api/currency/rate?${qs({ frm, to, on })}`),
   convert: (amount, frm, to, on) => call('GET', `/api/currency/convert?${qs({ amount, frm, to, on })}`),
   download: (id) => save(`/api/batches/${id}/export`, `batch-${id}.xlsx`),

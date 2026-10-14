@@ -17,7 +17,10 @@ export default function TopMenu({ menu }) {
   const groups = menu.groups
     .map((g) => [g, (meta || []).filter((m) => m.group === g)])
     .filter(([, l]) => l.length)
+  const tables = (meta || []).filter((m) => menu.also?.includes(m.group))
   const here = groups.some(([, l]) => l.some((m) => loc.pathname === `/masters/${m.slug}`))
+    || (menu.links || []).some((x) => loc.pathname === x.to)
+    || tables.some((m) => loc.pathname === `/masters/${m.slug}`)
     || (menu.wide && loc.pathname === '/masters/upload')
 
   useEffect(() => { setOpen(false) }, [loc.pathname])
@@ -62,7 +65,18 @@ export default function TopMenu({ menu }) {
                 <span>One Excel workbook or a file per table. Checked before anything is saved.</span>
               </NavLink>
             </div>
-          ) : groups.map(([g, l]) => list(g, l))}
+          ) : (
+            <>
+              {menu.links && (
+                <section className="mm-group"><ul>
+                  {menu.links.map((x) => (
+                    <li key={x.to}><NavLink to={x.to} onClick={close}>{x.title}</NavLink></li>
+                  ))}
+                </ul></section>
+              )}
+              {groups.map(([g, l]) => list(g, l))}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from . import config, models as M, models_master  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
-from .routers import api, master_upload, masters
+from .routers import api, assign_ops, master_upload, masters, terr_pg
 from .services import migrate, seed
 from .services.auth import read_token
 
@@ -44,6 +44,8 @@ def health():
 app.include_router(api.router)
 app.include_router(master_upload.router)      # before masters: /masters/upload is not a master
 app.include_router(masters.router)
+app.include_router(terr_pg.router)            # Customer / Employee Terr-PG pages
+app.include_router(assign_ops.router)         # their create / delete / assign all / clean
 
 Base.metadata.create_all(engine)
 try:

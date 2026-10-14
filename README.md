@@ -246,9 +246,39 @@ Administration opens one panel of four columns:
 
 | Menu | Screens |
 |---|---|
-| Assignment | **Customer Territory** (`CUSTOMER_TERR_ASSIGNMENT`), **Customer Product** (`CUSTOMER_PG_ASSIGNMENT`), **Employee Territory** (`EMPLOYEE_TERR_ASSIGNMENT`), **Employee Product** (`EMPLOYEE_PG_ASSIGNMENT`), **Team PG HQ** (`TEAM_PG_HQ_ASSIGNMENT`) |
+| Assignment | **Customer Terr-PG**, **Employee Terr-PG**, **Team PG HQ** (`TEAM_PG_HQ_ASSIGNMENT`) |
 | Budgeting | **Budget** (`BUDGET_MASTER`) |
 | Sales | **Sales** (`MAPPING_MASTER`), **Mid sales** (`MAPPING_MASTER_MID`) |
+
+**Customer Terr-PG and Employee Terr-PG** are one page each, as in the old
+system: every product assignment with its territory beside it (Customer Name,
+HQ, Territory, Product Group, Team, Product Brand, Product). They join two tables
+each (`routers/terr_pg.py`, `GET /api/terr-pg/{customer|employee}` and `/export`):
+CUSTOMER_PG_ASSIGNMENT to CUSTOMER_TERR_ASSIGNMENT on the customer and the
+product group, EMPLOYEE_PG_ASSIGNMENT to EMPLOYEE_TERR_ASSIGNMENT on the
+employee. A product with no territory still shows, HQ and Territory empty. Rows
+are added and edited in the four tables, linked from each page.
+
+**Adding and removing assignments** (`routers/assign_ops.py`,
+`POST /api/assign/{customer|employee|team_pg_hq}/{create|delete|assign_all|clean}`)
+works as the old forms did, in bulk. Every action is checked first (`dry_run`)
+and the screen asks before it writes, saying how many rows go in or out.
+
+* **Customer Terr-PG**: customer, territories, product groups and team (or the
+  team Team PG HQ lists for that group in that HQ). Create adds the territory
+  rows and every active product of the groups; Delete takes them out again.
+  **Assign all customers** gives every active customer (or the one the filter
+  shows) every HQ — each territory, with each group and team Team PG HQ lists
+  there — and every active product. **Delete all assignments** empties both
+  tables (or only that customer's rows).
+* **Employee Terr-PG**: employee, headquarters, one product group or several.
+  Create and Delete act only on what is ticked. **Delete all assignments**
+  empties the employee tables (or one employee's rows).
+* **Team PG HQ**: team, headquarters and product groups; Create, Delete,
+  and Delete all.
+
+Nothing is ever added twice. 1,500 customers × every HQ and product (about
+400,000 rows) assigns in a few seconds.
 
 **Lists read like the old screens**: S.No, the row's Id and name, its parents by
 name (a territory's Zone and HQ; a SKU's Product Group, Brand, and — through the
