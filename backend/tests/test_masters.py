@@ -27,10 +27,9 @@ def rows(h, slug, **params):
 def world(h):
     """A small but complete company: one of everything, wired together."""
     w = {}
-    w["y26"] = add(h, "year", year_value=2026, label="FY 2026-27", start_date="2026-04-01",
-                   end_date="2027-03-31", is_current=True)
-    w["y27"] = add(h, "year", year_value=2027, label="FY 2027-28", start_date="2027-04-01",
-                   end_date="2028-03-31")
+    w["y26"] = add(h, "year", year_number=2026)
+    w["cls"] = add(h, "customer_classification", description="NON INSTITUTIONAL")
+    w["rep"] = add(h, "reporting", reporting="P1")
     np_ = [x for x in rows(h, "country")["rows"] if x["code"] == "NP"][0]
     w["np"] = np_
     w["co"] = add(h, "company", code="acme", name="Acme Pharma")
@@ -42,26 +41,25 @@ def world(h):
     w["pg"] = add(h, "product_group", code="CARD", name="Cardio", company_id=w["co"]["id"])
     w["pg2"] = add(h, "product_group", code="GAST", name="Gastro")
     # brands and products point at a group's Master ID, as the Excel tables do
-    w["br"] = add(h, "brand", product_brand_name="ATORVA", product_group_id=w["pg"]["legacy_id"])
+    w["team"] = add(h, "team", code="T-CV", name="Cardio team")
+    w["br"] = add(h, "brand", product_brand_name="ATORVA", product_group_id=w["pg"]["legacy_id"],
+                  team_id=w["team"]["legacy_id"], reporting="P1")
     w["br2"] = add(h, "brand", product_brand_name="PANTO", product_group_id=w["pg2"]["legacy_id"])
     w["sku1"] = add(h, "sku", sap_product_name="ATORVA 10", product_brand_id=w["br"]["id"],
                     aliases="ATORVA-10 TAB\nATOR 10")
     w["sku2"] = add(h, "sku", sap_product_name="ATORVA 20", product_brand_id=w["br"]["id"])
     w["sku3"] = add(h, "sku", sap_product_name="PANTO 40", product_brand_id=w["br2"]["id"])
-    w["team"] = add(h, "team", code="T-CV", name="Cardio team")
     w["des"] = add(h, "designation", code="MR", name="Medical Rep", level=1)
     w["des2"] = add(h, "designation", code="ABM", name="Area Manager", level=2)
     w["role"] = add(h, "role", code="FIELD", name="Field")
-    w["cust"] = add(h, "customer", customer_name="CITY CHEMIST", cust_classification_id=1,
+    w["cust"] = add(h, "customer", customer_name="CITY CHEMIST", cust_classification_id=w["cls"]["id"],
                     hq_id=w["hq"]["legacy_id"], aliases=["CITY CHEM KTM", "City Chemist"])
     w["boss"] = add(h, "employee", employee_ft_nm="Asha", designation_id=w["des2"]["legacy_id"])
     w["emp"] = add(h, "employee", employee_ft_nm="Bikash", designation_id=w["des"]["legacy_id"],
                    team="Cardio team", role_id=w["role"]["legacy_id"],
                    reporting_manager_id=w["boss"]["id"])
-    add(h, "team_product_group", year_id=w["y26"]["id"], team_id=w["team"]["id"],
-        product_group_id=w["pg"]["id"])
-    add(h, "team_headquarter", year_id=w["y26"]["id"], team_id=w["team"]["id"],
-        headquarter_id=w["hq"]["id"])
+    w["tph"] = add(h, "team_pg_hq", team_id=w["team"]["legacy_id"],
+                   product_group_id=w["pg"]["legacy_id"], hq_id=w["hq"]["legacy_id"])
     return w
 
 
@@ -69,10 +67,13 @@ def world(h):
 def test_every_master_is_described(h):
     slugs = {m["slug"] for m in ok(c.get("/api/masters/meta", headers=h))}
     assert {"year", "distributor", "company", "country", "currency_rate", "company_country",
-            "zone", "headquarter", "territory", "product_group", "brand", "sku",
-            "product_reporting", "product_reporting_sku", "customer", "designation", "role",
-            "team", "team_product_group", "team_headquarter", "employee",
-            "customer_assignment", "employee_assignment"} <= slugs
+            "zone", "headquarter", "territory", "product_group", "brand", "sku", "reporting",
+            "customer", "customer_classification", "designation", "role", "team", "employee",
+            "team_pg_hq",
+            "customer_terr_assignment", "customer_pg_assignment", "employee_terr_assignment",
+            "employee_pg_assignment"} <= slugs
+    assert not {"customer_assignment", "employee_assignment", "product_reporting",
+                "product_reporting_sku", "team_product_group", "team_headquarter"} & slugs  # removed
 
 
 def test_labels_come_back_with_references(h, world):
@@ -140,14 +141,14 @@ def test_a_reference_that_does_not_exist_is_refused(h, world):
 def test_an_excel_table_id_may_point_ahead_of_its_parent(h):
     """CUSTOMER_MASTER.ZONE_ID 12 before ZONE 12 is uploaded: kept, and labelled so."""
     x = add(h, "customer", customer_name="AHEAD", zone_id=424242)
-    assert x["zone_id"] == 424242 and "not in Zones" in x["zone_id__label"]
+    assert x["zone_id"] == 424242 and "not in Zone" in x["zone_id__label"]
 
 
 def test_something_in_use_cannot_be_deleted(h, world):
-    refused(c.delete(f"/api/masters/zone/{world['zone']['id']}", headers=h), 409, "Headquarters")
+    refused(c.delete(f"/api/masters/zone/{world['zone']['id']}", headers=h), 409, "Head Quarter")
     # a product group named by a brand's PRODUCT_GROUP_ID is in use too
-    refused(c.delete(f"/api/masters/product_group/{world['pg']['id']}", headers=h), 409, "Brands")
-    refused(c.delete(f"/api/masters/brand/{world['br']['id']}", headers=h), 409, "Products")
+    refused(c.delete(f"/api/masters/product_group/{world['pg']['id']}", headers=h), 409, "Product Brand")
+    refused(c.delete(f"/api/masters/brand/{world['br']['id']}", headers=h), 409, "SKU")
 
 
 def test_delete_many_is_all_or_nothing(h, world):
@@ -163,20 +164,6 @@ def test_inactive_rows_leave_the_drop_downs(h, world):
     x = add(h, "role", code="OLD", name="Old role", active=False)
     opts = ok(c.get("/api/masters/role/options", headers=h))
     assert x["id"] not in [o["id"] for o in opts]
-
-
-# =================================================================== years
-def test_only_one_year_is_current(h, world):
-    ok(c.put(f"/api/masters/year/{world['y27']['id']}", json={"is_current": True}, headers=h))
-    cur = [y for y in rows(h, "year")["rows"] if y["is_current"]]
-    assert [y["year_value"] for y in cur] == [2027]
-    ok(c.put(f"/api/masters/year/{world['y26']['id']}", json={"is_current": True}, headers=h))
-
-
-def test_a_year_must_end_after_it_starts(h):
-    refused(c.post("/api/masters/year", json={"year_value": 2030, "label": "x",
-                   "start_date": "2030-04-01", "end_date": "2030-03-01"}, headers=h),
-            422, "end after")
 
 
 # ================================================================ currency
@@ -232,90 +219,58 @@ def test_territories_narrow_to_a_zone(h, world):
     assert len(opts) == 2
 
 
-def test_reporting_lines_carry_a_flag_and_one_line_per_sku_per_year(h, world):
-    refused(c.post("/api/masters/product_reporting", json={"year_id": world["y26"]["id"],
-                   "code": "BAD", "name": "x", "flag": "P3"}, headers=h), 422, "P1, P2")
-    p1 = add(h, "product_reporting", year_id=world["y26"]["id"], code="ATORVA", name="Atorva",
-             flag="P1")
-    x = add(h, "product_reporting", year_id=world["y26"]["id"], code="OTH", name="Others",
-            flag="X")
-    m = add(h, "product_reporting_sku", product_reporting_id=p1["id"], sku_id=world["sku1"]["id"])
-    assert m["year_id"] == world["y26"]["id"]                   # taken from the line
-    refused(c.post("/api/masters/product_reporting_sku",
-                   json={"product_reporting_id": x["id"], "sku_id": world["sku1"]["id"]},
-                   headers=h), 409, "another line")
-
-
 def test_an_employee_cannot_report_in_a_circle(h, world):
     refused(c.put(f"/api/masters/employee/{world['boss']['id']}",
                   json={"reporting_manager_id": world["emp"]["id"]}, headers=h), 422, "circle")
 
 
-# =============================================================== alignment
-def _ca(world, **over):
-    return {"year_id": world["y26"]["id"], "customer_id": world["cust"]["id"],
-            "territory_id": world["terr"]["id"], "team_id": world["team"]["id"],
-            "product_group_id": world["pg"]["id"], "sku_id": world["sku1"]["id"], **over}
+# ================================================== the old system's tables
+def test_a_year_is_a_year_once(h, world):
+    refused(c.post("/api/masters/year", json={"year_number": 2026}, headers=h), 409, "already there")
+    refused(c.post("/api/masters/year", json={"year_number": 26}, headers=h), 422, "between 2000")
 
 
-def test_customer_sku_must_be_in_the_group(h, world):
-    refused(c.post("/api/masters/customer_assignment",
-                   json=_ca(world, sku_id=world["sku3"]["id"]), headers=h), 422, "not in the product group")
+def test_team_pg_hq_fills_its_names_and_is_kept_once(h, world):
+    t = world["tph"]
+    assert (t["team_name"], t["product_group_name"], t["hq_name"]) == ("Cardio team", "Cardio", "Kathmandu")
+    refused(c.post("/api/masters/team_pg_hq", json={"team_id": world["team"]["legacy_id"],
+                   "product_group_id": world["pg"]["legacy_id"], "hq_id": world["hq"]["legacy_id"]},
+                   headers=h), 409, "already has")
 
 
-def test_customer_team_must_carry_the_group(h, world):
-    refused(c.post("/api/masters/customer_assignment",
-                   json=_ca(world, product_group_id=world["pg2"]["id"], sku_id=world["sku3"]["id"]),
-                   headers=h), 422, "does not carry")
+def _view(h, slug, **params):
+    meta = {m["slug"]: m for m in ok(c.get("/api/masters/meta", headers=h))}[slug]
+    labels = [v["label"] for v in meta["view"]]
+    return [dict(zip(labels, r["__view"])) for r in rows(h, slug, **params)["rows"]]
 
 
-def test_customer_team_must_cover_the_territory_hq(h, world):
-    refused(c.post("/api/masters/customer_assignment",
-                   json=_ca(world, territory_id=world["terr2"]["id"]), headers=h), 422, "Pokhara")
+def test_lists_read_like_the_old_screens(h, world):
+    t = [r for r in _view(h, "territory") if r["Territory Name"] == "Kathmandu 1"][0]
+    assert (t["Zone"], t["HQ"], t["Active Status"]) == ("East", "Kathmandu", 1)
+    s = [r for r in _view(h, "sku") if r["Product Name"] == "ATORVA 10"][0]
+    # a SKU's group, team and reporting come through its brand
+    assert (s["Product Group Name"], s["Product Brand Name"], s["Team"], s["Reporting"]) == \
+        ("Cardio", "ATORVA", "Cardio team", "P1")
+    cu = [r for r in _view(h, "customer") if r["Customer Name"] == "CITY CHEMIST"][0]
+    assert cu["Customer Classification"] == "NON INSTITUTIONAL"
+    e = [r for r in _view(h, "employee") if r["Employee Name"] == "Bikash"][0]
+    assert (e["Role"], e["Designation"], e["Reporting Manager"]) == ("Field", "Medical Rep", "Asha")
 
 
-def test_customer_alignment_in_bulk_by_product_group(h, world):
-    body = {k: v for k, v in _ca(world).items() if k != "sku_id"}
-    r = ok(c.post("/api/masters/customer_assignment/bulk", json=body, headers=h))
-    assert r == {"created": 2, "skipped": 0, "skus": 2}
-    r = ok(c.post("/api/masters/customer_assignment/bulk", json=body, headers=h))
-    assert r == {"created": 0, "skipped": 2, "skus": 2}           # nothing twice
-    got = rows(h, "customer_assignment", customer_id=world["cust"]["id"])
-    assert got["total"] == 2 and "ATORVA" in got["rows"][0]["sku_id__label"]
+def test_an_id_no_master_knows_shows_the_tables_own_name(h, world):
+    add(h, "team_pg_hq", team_id=world["team"]["legacy_id"], product_group_id=world["pg"]["legacy_id"],
+        hq_id=987, hq_name="DHANGADHI")
+    r = [x for x in _view(h, "team_pg_hq") if x["HQ"] == "DHANGADHI"][0]
+    assert (r["Team"], r["Product Group"]) == ("Cardio team", "Cardio")
 
 
-def test_employee_alignment_in_bulk(h, world):
-    body = {"year_id": world["y26"]["id"], "employee_id": world["emp"]["id"],
-            "territory_id": world["terr"]["id"], "product_group_id": world["pg"]["id"],
-            "brand_id": world["br"]["id"]}
-    assert ok(c.post("/api/masters/employee_assignment/bulk", json=body, headers=h))["created"] == 2
-    # the employee's team does not carry Gastro
-    refused(c.post("/api/masters/employee_assignment/bulk",
-                   json={**body, "product_group_id": world["pg2"]["id"], "brand_id": None},
-                   headers=h), 422, "does not carry")
-
-
-def test_a_year_can_start_from_the_one_before(h, world):
-    y26, y27 = world["y26"]["id"], world["y27"]["id"]
-    for slug in ("team_product_group", "team_headquarter"):
-        r = ok(c.post(f"/api/masters/{slug}/copy-year",
-                      json={"from_year_id": y26, "to_year_id": y27}, headers=h))
-        assert r["created"] == 1
-    r = ok(c.post("/api/masters/customer_assignment/copy-year",
-                  json={"from_year_id": y26, "to_year_id": y27}, headers=h))
-    assert r["created"] == 2 and r["skipped"] == 0
-    r = ok(c.post("/api/masters/product_reporting/copy-year",
-                  json={"from_year_id": y26, "to_year_id": y27}, headers=h))
-    assert r["created"] == 2
-    assert rows(h, "product_reporting_sku", year_id=y27)["total"] == 1
-
-
-def test_a_closed_year_cannot_be_changed(h, world):
-    y = add(h, "year", year_value=2020, label="FY 2020-21", start_date="2020-04-01",
-            end_date="2021-03-31", active=False)
-    refused(c.post("/api/masters/team_product_group", json={"year_id": y["id"],
-                   "team_id": world["team"]["id"], "product_group_id": world["pg"]["id"]},
-                   headers=h), 422, "closed")
+def test_the_menu_follows_the_old_system(h):
+    meta = ok(c.get("/api/masters/meta", headers=h))
+    groups = list(dict.fromkeys(m["group"] for m in meta))
+    assert groups == ["Organisation structure", "Product", "Master data", "Others",
+                      "Assignment", "Budgeting", "Sales"]
+    assert [m["title"] for m in meta if m["group"] == "Organisation structure"] == \
+        ["Company", "Zone", "Head Quarter", "Territory"]
 
 
 # ============================================================= distributor

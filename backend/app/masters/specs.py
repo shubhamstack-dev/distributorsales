@@ -12,11 +12,12 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from .. import models as M
 from .. import models_master as X
+from . import view as V
+from .view import Col
 
 
 @dataclass
@@ -57,10 +58,14 @@ class Spec:
     extra_refs: list[tuple] = field(default_factory=list)   # (model, attr, "what")
     option_filters: dict = field(default_factory=dict)      # param -> fn(select, value)
     description: str = ""
-    bulk_by_sku: bool = False              # offers "assign every SKU of a group"
-    year_bound: bool = False               # has year_id; offers "copy from year"
     sheets: list[str] = field(default_factory=list)   # sheet / file names an upload knows it by
     master_id: bool = False                # has legacy_id, the Master ID the Excel tables point at
+    bulk: bool = False                     # a data table of thousands of rows: uploaded in bulk
+                                           # (services/bulk_load.py), left out of "every master"
+    match: tuple[str, ...] = ()            # bulk: the columns that find a row again on re-upload
+    filters: list[str] = field(default_factory=list)  # fields offered as filters above the list
+    view: list = field(default_factory=list)          # list columns (view.Col); default: in_list
+    name: Callable | None = None           # the row as a parent column shows it (view.name_of)
 
     def f(self, name):
         return next(x for x in self.fields if x.name == name)
@@ -70,28 +75,23 @@ def bad(msg: str, code: int = 422):
     raise HTTPException(code, msg)
 
 
-CLASSIFICATIONS = ["Chemist", "Stockist", "Hospital", "Institution", "Doctor", "Sub-stockist"]
-FLAGS = ["P1", "P2", "X"]
 
 
-def _year_rows_ok(db: Session, year_id: int):
-    y = db.get(X.Year, year_id)
-    if y and not y.active:
-        bad(f"{y.label} is closed (inactive). Reopen the year before changing its alignment.")
+def v_year_number(db, o):
+    if not 2000 <= int(o.year_number) <= 2100:
+        bad("YEAR_NUMBER has to be a year between 2000 and 2100.")
 
 
-# ------------------------------------------------------------- validators
-def v_year(db, o):
-    if not 2000 <= int(o.year_value) <= 2100:
-        bad("Year has to be between 2000 and 2100.")
-    if o.end_date <= o.start_date:
-        bad("The year has to end after it starts.")
-
-
-def after_year(db, o):
-    # only one year is current; marking one clears the rest
-    if o.is_current:
-        db.execute(update(X.Year).where(X.Year.id != o.id).values(is_current=0))
+def v_team_pg_hq(db, o):
+    """The *_NAME columns follow the IDs, so the table reads on its own."""
+    for idf, namef, model in (("team_id", "team_name", X.Team),
+                              ("product_group_id", "product_group_name", X.ProductGroup),
+                              ("hq_id", "hq_name", X.Headquarter)):
+        v = getattr(o, idf)
+        if v is not None:
+            row = db.execute(select(model).where(model.legacy_id == v)).scalars().first()
+            if row is not None:
+                setattr(o, namef, row.name)
 
 
 def v_country(db, o):
@@ -118,18 +118,6 @@ def v_rate(db, o):
     if rev:
         bad(f"Rates for this pair are kept as {o.to_currency} → {o.from_currency}; "
             f"the other direction is worked out from it. Enter the rate that way.")
-
-
-def v_reporting(db, o):
-    if o.flag not in FLAGS:
-        bad("Flag is P1, P2 or X (others).")
-    _year_rows_ok(db, o.year_id)
-
-
-def v_reporting_sku(db, o):
-    pr = db.get(X.ProductReporting, o.product_reporting_id)
-    o.year_id = pr.year_id                      # derived: the line's year
-    _year_rows_ok(db, o.year_id)
 
 
 def v_employee(db, o):
@@ -159,71 +147,6 @@ def v_product(db, o):
             o.product_group_id = b.product_group_id
 
 
-def group_md_id(db, master_id) -> int | None:
-    """md_product_group.Id for a PRODUCT_GROUP_ID (its Master ID)."""
-    if master_id is None:
-        return None
-    return db.execute(select(X.ProductGroup.id)
-                      .where(X.ProductGroup.legacy_id == master_id)).scalar()
-
-
-def _sku_group(db, sku_id) -> int | None:
-    s = db.get(X.ProductMaster, sku_id)
-    if not s:
-        return None
-    gid = s.product_group_id
-    if gid is None and s.product_brand_id is not None:
-        b = db.get(X.ProductMasterBrand, s.product_brand_id)
-        gid = b.product_group_id if b else None
-    return group_md_id(db, gid)
-
-
-def _pg_name(db, pg_id):
-    g = db.get(X.ProductGroup, pg_id)
-    return g.name if g else f"#{pg_id}"
-
-
-def v_customer_assignment(db, o):
-    _year_rows_ok(db, o.year_id)
-    if _sku_group(db, o.sku_id) != o.product_group_id:
-        bad("That SKU is not in the product group chosen.")
-    if not db.execute(select(X.TeamProductGroup.id).where(
-            X.TeamProductGroup.year_id == o.year_id, X.TeamProductGroup.team_id == o.team_id,
-            X.TeamProductGroup.product_group_id == o.product_group_id)).first():
-        t = db.get(X.Team, o.team_id)
-        bad(f"Team {t.name} does not carry {_pg_name(db, o.product_group_id)} in this year. "
-            f"Assign the product group to the team first (Teams › Product groups).")
-    terr = db.get(X.Territory, o.territory_id)
-    if not db.execute(select(X.TeamHeadquarter.id).where(
-            X.TeamHeadquarter.year_id == o.year_id, X.TeamHeadquarter.team_id == o.team_id,
-            X.TeamHeadquarter.headquarter_id == terr.headquarter_id)).first():
-        t, hq = db.get(X.Team, o.team_id), db.get(X.Headquarter, terr.headquarter_id)
-        bad(f"Territory {terr.name} is under HQ {hq.name}, which team {t.name} does not cover "
-            f"in this year. Assign the HQ to the team first (Teams › Headquarters).")
-
-
-def employee_team(db, e) -> X.Team | None:
-    """EMPLOYEE_MASTER.TEAM is the team's name (or code), as the old system kept it."""
-    if not e or not e.team:
-        return None
-    t = e.team.strip().upper()
-    return db.execute(select(X.Team).where(
-        (func.upper(X.Team.name) == t) | (func.upper(X.Team.code) == t))).scalars().first()
-
-
-def v_employee_assignment(db, o):
-    _year_rows_ok(db, o.year_id)
-    if _sku_group(db, o.sku_id) != o.product_group_id:
-        bad("That SKU is not in the product group chosen.")
-    e = db.get(X.EmployeeMaster, o.employee_id)
-    t = employee_team(db, e)
-    if t and not db.execute(select(X.TeamProductGroup.id).where(
-            X.TeamProductGroup.year_id == o.year_id, X.TeamProductGroup.team_id == t.id,
-            X.TeamProductGroup.product_group_id == o.product_group_id)).first():
-        bad(f"{e.name} is in team {t.name}, which does not carry "
-            f"{_pg_name(db, o.product_group_id)} in this year.")
-
-
 def _group_master_id(v):
     return select(X.ProductGroup.legacy_id).where(X.ProductGroup.id == int(v)).scalar_subquery()
 
@@ -247,7 +170,6 @@ NAME = Field("name", "Name", required=True)
 ACTIVE = Field("active", "Active", "bool", default=1, cols=["STATUS", "IS_ACTIVE"])
 STATUS = Field("active", "Status", "bool", default=1, cols=["STATUS"],
                help="Active (1) or inactive (0)")
-YEAR = Field("year_id", "Year", "ref", required=True, ref="year")
 MASTER_ID = Field("legacy_id", "Master ID", "int",
                   help="The ID the master tables (CUSTOMER_MASTER, PRODUCT_MASTER …) use for "
                        "this row. Left blank, the next free number is given.")
@@ -285,19 +207,111 @@ def _label_mid(o):
         else f"{o.code} — {o.name}"
 
 
+# ============================ the data tables of the old system (Book1.xlsx)
+# Their *_ID columns name master rows the way the old system did: PRODUCT_ID,
+# PRODUCT_BRAND_ID, CUSTOMER_ID and EMPLOYEE_ID are the master tables' own ids;
+# HQ_ID, TERRITORY_ID, PRODUCT_GROUP_ID and TEAM_ID are Master IDs. All "soft":
+# a sales row from 2016 naming a product no longer in the masters is kept.
+ID_REFS = {
+    "PRODUCT_ID": ("sku", None), "PRODUCT_BRAND_ID": ("brand", None),
+    "CUSTOMER_ID": ("customer", None), "EMPLOYEE_ID": ("employee", None),
+    "HQ_ID": ("headquarter", "legacy_id"), "TERRITORY_ID": ("territory", "legacy_id"),
+    "PRODUCT_GROUP_ID": ("product_group", "legacy_id"), "TEAM_ID": ("team", "legacy_id"),
+}
+MONTH_NAMES = [m.title() for m in X.MONTHS]
+
+
+def _table_fields(cols, listed=(), required=()) -> list[Field]:
+    """One field per column of a workbook table, labelled with the column's own
+    name. The table's ID is left to the caller."""
+    out = []
+    for name, kind in cols:
+        if name == "ID":
+            continue
+        a = X.attr_of(name)
+        if name in ID_REFS:
+            slug, key = ID_REFS[name]
+            f = Field(a, name, "ref", ref=slug, key=key, soft=True)
+        elif name == "MONTH":
+            f = Field(a, name, "select", options=MONTH_NAMES,
+                      help="The month's name in full, e.g. January")
+        else:
+            f = Field(a, name, "int" if kind == "int" else "decimal" if kind == "num" else "text")
+        f.in_list = name in listed
+        f.required = name in required
+        out.append(f)
+    return out
+
+
+ID_FIELD = Field("id", "ID", "int", create_only=True, help="Left blank, the next number is given.")
+SALES_LISTED = ["YEAR", "MONTH", "DIST_NAME", "INVOICE_NO", "CUSTOMER_NAME", "PRODUCT_NAME",
+                "HQ_NAME", "SALES_QTY", "FREE_QUANTITY", "RETURN_QUANTITY", "RATE"]
+SALES_SEARCH = ["customer_name", "customer_master_name", "product_name", "dist_name",
+                "invoice_no", "hq_name"]
+BUDGET_LISTED = ["S_NO", "TARGET_YEAR", "EMPLOYEE_ID", "HQ_NAME", "PRODUCT_GROUP",
+                 "PRODUCT_BRAND", "PRODUCT_NAME", "PRODUCT_BRAND_CATEGORY"]
+
+# (slug, title, model, sheet names, filters, description)
+ASSIGNMENT_SPECS = [
+    ("customer_terr_assignment", "Customer territory assignment", X.CustomerTerrAssignment,
+     ["CUSTOMER_TERR_ASSIGNMENT"], ["customer_id", "hq_id", "product_group_id", "team_id"],
+     "CUSTOMER_TERR_ASSIGNMENT: which territory, HQ and team cover a customer for a product "
+     "group."),
+    ("customer_pg_assignment", "Customer product assignment", X.CustomerPgAssignment,
+     ["CUSTOMER_PG_ASSIGNMENT"], ["customer_id", "product_group_id", "product_brand_id", "product_id"],
+     "CUSTOMER_PG_ASSIGNMENT: which products of which brand and group each customer is "
+     "assigned."),
+    ("employee_terr_assignment", "Employee territory assignment", X.EmployeeTerrAssignment,
+     ["EMPLOYEE_TERR_ASSIGNMENT"], ["employee_id", "hq_id", "territory_id"],
+     "EMPLOYEE_TERR_ASSIGNMENT: which HQ and territory each employee covers."),
+    ("employee_pg_assignment", "Employee product assignment", X.EmployeePgAssignment,
+     ["EMPLOYEE_PG_ASSIGNMENT"], ["employee_id", "product_group_id", "product_brand_id", "product_id"],
+     "EMPLOYEE_PG_ASSIGNMENT: which products of which brand and group each employee promotes."),
+]
+
+
+def _assignment_spec(slug, title, model, sheets, filters, description):
+    cols = X.ASSIGNMENT_COLUMNS[model.__tablename__]
+    attrs = tuple(X.attr_of(c) for c in cols)
+    return Spec(slug, title, "Assignment", model,
+                _table_fields([(c, "int") for c in cols], listed=cols, required=cols),
+                label=lambda o: f"#{o.id}", search=[], order=list(attrs), bulk=True, match=attrs,
+                unique=[(attrs, "That assignment is already there.")],
+                filters=filters, sheets=sheets,
+                description=description + " Every column together makes the row, so uploading "
+                                          "the same sheet again adds nothing.")
+
+
 SPECS: list[Spec] = [
     # ------------------------------------------------------------ setup
-    Spec("year", "Years", "Setup", X.Year, [
-        Field("year_value", "Year", "int", required=True, cols=["YEAR"]),
-        Field("label", "Label", required=True, help="e.g. FY 2026-27"),
-        Field("start_date", "Starts", "date", required=True, cols=["START_DATE"]),
-        Field("end_date", "Ends", "date", required=True, cols=["END_DATE"]),
-        Field("is_current", "Current year", "bool", default=0),
-        Field("active", "Open", "bool", default=1, help="A closed year's alignment is read-only."),
-    ], label=lambda o: o.label, search=["label"], order=["-year_value"],
-        unique=[(("year_value",), "That year is already set up.")],
-        validate=v_year, after_save=after_year, sheets=["YEAR_MASTER", "YEARS"],
-        description="The years alignment is kept for. Marking one current clears the others."),
+    Spec("year", "Year", "Others", X.YearMaster, [
+        Field("id", "YEAR_ID", "int", create_only=True, help="Left blank, the next number is given."),
+        Field("year_number", "YEAR_NUMBER", "int", required=True),
+        Field("active", "STATUS", "bool", default=1),
+    ], label=lambda o: str(o.year_number), name=lambda o: str(o.year_number),
+        search=[], order=["-year_number"], validate=v_year_number,
+        unique=[(("year_number",), "That year is already there.")],
+        sheets=["YEAR_MASTER", "YEARS"], description="YEAR_MASTER of the old system."),
+
+    Spec("reporting", "Product Reporting", "Product", X.BrandReporting, [
+        Field("id", "ID", "int", create_only=True, help="Left blank, the next number is given."),
+        Field("reporting", "REPORTING", required=True, help="e.g. P1, P2, N1, X-OTHERS"),
+        Field("active", "STATUS", "bool", default=1),
+    ], label=lambda o: o.reporting, name=lambda o: o.reporting, search=["reporting"],
+        order=["id"], unique=[(("reporting",), "That reporting line is already there.")],
+        sheets=["PRODUCT_MASTER_BRAND_REPORTING", "PRODUCT_REPORTING", "REPORTING"],
+        description="PRODUCT_MASTER_BRAND_REPORTING: the lines a brand reports under. "
+                    "A brand's REPORTING names one of these."),
+
+    Spec("customer_classification", "Customer Classification", "Master data",
+         X.CustomerClassification, [
+        Field("id", "ID", "int", create_only=True, help="Left blank, the next number is given."),
+        Field("description", "DESCRIPTION", required=True, help="e.g. INSTITUTIONAL"),
+        Field("active", "STATUS", "bool", default=1),
+    ], label=lambda o: o.description, name=lambda o: o.description, search=["description"],
+        order=["id"], unique=[(("description",), "That classification is already there.")],
+        sheets=["CUSTOMER_CLASSIFICATION", "CUST_CLASSIFICATION"],
+        description="CUSTOMER_CLASSIFICATION: CUSTOMER_MASTER.CUST_CLASSIFICATION_ID points at ID."),
 
     Spec("distributor", "Distributors", "Setup", M.Distributor, [
         Field("name", "Name", required=True, cols=["DISTRIBUTOR_NAME"]),
@@ -398,12 +412,13 @@ SPECS: list[Spec] = [
         _keyed("product_group_id", "PRODUCT_GROUP_ID", "product_group"),
         Field("start_date", "START_DATE", "date", in_list=False),
         Field("end_date", "END_DATE", "date", in_list=False),
-        Field("reporting", "REPORTING", suggest=["P1", "P2", "X-OTHERS"]),
+        Field("reporting", "REPORTING", suggest=["N1", "P1", "P2", "X-OTHERS"],
+              help="A line of Product Reporting: N1, P1, P2 or X-OTHERS"),
         _keyed("team_id", "TEAM_ID", "team", in_list=False),
         Field("nrv", "NRV", in_list=False),
         Field("no_of_sku", "NO_OF_SKU", "int"),
         Field("active", "STATUS", "bool", default=1),
-    ], label=lambda o: f"{o.id} — {o.product_brand_name}",
+    ], label=lambda o: f"{o.id} — {o.product_brand_name}", name=lambda o: o.product_brand_name,
         search=["product_brand_name", "reporting"], order=["product_brand_name"],
         option_filters={"product_group_id": _brand_by_group},
         sheets=["PRODUCT_MASTER_BRAND", "BRAND", "BRANDS", "BRAND_MASTER"],
@@ -425,7 +440,7 @@ SPECS: list[Spec] = [
         Field("aliases", "PRODUCT_ALIAS_1 … 100", "aliases", count=X.PRODUCT_ALIASES,
               help="The names distributors write this product under, one per line "
                    "(PRODUCT_ALIAS_1 to PRODUCT_ALIAS_100)."),
-    ], label=lambda o: f"{o.id} — {o.sap_product_name}",
+    ], label=lambda o: f"{o.id} — {o.sap_product_name}", name=lambda o: o.sap_product_name,
         search=["sap_product_name", "sap_product_id", "material_code",
                 *[f"alias_{i}" for i in range(1, X.PRODUCT_ALIASES + 1)]],
         order=["sap_product_name"], validate=v_product,
@@ -433,27 +448,6 @@ SPECS: list[Spec] = [
         sheets=["PRODUCT_MASTER", "PRODUCTS", "SKU", "SKUS", "SKU_MASTER"],
         description="PRODUCT_MASTER, as in MASTER DATA & TABLES.xlsx. Each product belongs to one "
                     "brand; its aliases are kept on the row (PRODUCT_ALIAS_1 to 100)."),
-
-    Spec("product_reporting", "Product reporting", "Products", X.ProductReporting, [
-        *_c(YEAR, CODE, NAME),
-        Field("flag", "Flag", "select", required=True, options=FLAGS,
-              help="P1, P2, or X for others"),
-        *_c(ACTIVE)],
-        label=lambda o: f"{o.code} — {o.name} ({o.flag})",
-        unique=[(("year_id", "code"), "That year already has a reporting line with that code.")],
-        validate=v_reporting, year_bound=True, sheets=["PRODUCT_REPORTING"],
-        description="Reporting lines for a year, each flagged P1, P2 or X (others)."),
-
-    Spec("product_reporting_sku", "Product reporting › SKUs", "Products", X.ProductReportingSku, [
-        Field("product_reporting_id", "Reporting line", "ref", required=True,
-              ref="product_reporting"),
-        Field("sku_id", "SKU", "ref", required=True, ref="sku", cols=["PRODUCT_ID"]),
-        Field("year_id", "Year", "ref", ref="year", derived=True),
-    ], label=lambda o: f"#{o.id}", search=[], order=["product_reporting_id", "sku_id"],
-        unique=[(("year_id", "sku_id"),
-                 "That SKU already reports under another line in this year.")],
-        validate=v_reporting_sku, sheets=["PRODUCT_REPORTING_SKU"],
-        description="Which reporting line each SKU rolls up to. One line per SKU per year."),
 
     # -------------------------------------------------------- customers
     Spec("customer", "Customers", "Customers", X.CustomerMaster, [
@@ -466,7 +460,8 @@ SPECS: list[Spec] = [
         Field("sub_territory_id", "SUB_TERRITORY_ID", "int", in_list=False),
         Field("customer_billing_name", "CUSTOMER_BILLING_NAME", in_list=False),
         Field("state_id", "STATE_ID", "int", in_list=False),
-        Field("cust_classification_id", "CUST_CLASSIFICATION_ID", "int"),
+        Field("cust_classification_id", "CUST_CLASSIFICATION_ID", "ref", ref="customer_classification",
+              soft=True),
         Field("cust_remark_id", "CUST_REMARK_ID", "int", in_list=False),
         Field("start_date", "START_DATE", "date", in_list=False),
         Field("end_date", "END_DATE", "date", in_list=False),
@@ -474,7 +469,7 @@ SPECS: list[Spec] = [
         Field("aliases", "CUSTOMER_ALIAS_1 … 50", "aliases", count=X.CUSTOMER_ALIASES,
               help="The names distributors write this customer under, one per line "
                    "(CUSTOMER_ALIAS_1 to CUSTOMER_ALIAS_50)."),
-    ], label=lambda o: f"{o.id} — {o.customer_name}",
+    ], label=lambda o: f"{o.id} — {o.customer_name}", name=lambda o: o.customer_name,
         search=["customer_name", "customer_sap_id", "customer_billing_name",
                 *[f"alias_{i}" for i in range(1, X.CUSTOMER_ALIASES + 1)]],
         order=["customer_name"],
@@ -512,29 +507,7 @@ SPECS: list[Spec] = [
         description="EMPLOYEE_MASTER.TEAM names a team; PRODUCT_MASTER_BRAND.TEAM_ID is its "
                     "Master ID."),
 
-    Spec("team_product_group", "Team › Product groups", "People", X.TeamProductGroup, [
-        *_c(YEAR),
-        Field("team_id", "Team", "ref", required=True, ref="team"),
-        Field("product_group_id", "Product group", "ref", required=True, ref="product_group"),
-    ], label=lambda o: f"#{o.id}", search=[], order=["team_id", "product_group_id"],
-        unique=[(("year_id", "team_id", "product_group_id"),
-                 "That team already carries that product group in this year.")],
-        validate=lambda db, o: _year_rows_ok(db, o.year_id), year_bound=True,
-        sheets=["TEAM_PRODUCT_GROUP"],
-        description="Which product groups each team promotes, by year."),
-
-    Spec("team_headquarter", "Team › Headquarters", "People", X.TeamHeadquarter, [
-        *_c(YEAR),
-        Field("team_id", "Team", "ref", required=True, ref="team"),
-        Field("headquarter_id", "Headquarter", "ref", required=True, ref="headquarter"),
-    ], label=lambda o: f"#{o.id}", search=[], order=["team_id", "headquarter_id"],
-        unique=[(("year_id", "team_id", "headquarter_id"),
-                 "That team already covers that HQ in this year.")],
-        validate=lambda db, o: _year_rows_ok(db, o.year_id), year_bound=True,
-        sheets=["TEAM_HEADQUARTER", "TEAM_HQ"],
-        description="Which HQs each team covers, by year."),
-
-    Spec("employee", "Employees", "People", X.EmployeeMaster, [
+    Spec("employee", "Employees", "People", X.EmployeeMaster, name=lambda o: o.full_name, fields=[
         Field("id", "EMPLOYEE_ID", "int", create_only=True, help="Left blank, the next number is given."),
         Field("employee_ft_nm", "EMPLOYEE_FT_NM", required=True, help="First name"),
         Field("employee_lt_nm", "EMPLOYEE_LT_NM", help="Last name"),
@@ -556,40 +529,148 @@ SPECS: list[Spec] = [
         description="EMPLOYEE_MASTER, as in MASTER DATA & TABLES.xlsx. The PASSWORD column is never "
                     "stored: an upload reads past it."),
 
-    # -------------------------------------------------------- alignment
-    Spec("customer_assignment", "Customer alignment", "Alignment", X.CustomerAssignment, [
-        *_c(YEAR),
-        Field("customer_id", "Customer", "ref", required=True, ref="customer", cols=["CUSTOMER_ID"]),
-        Field("territory_id", "Territory", "ref", required=True, ref="territory"),
-        Field("team_id", "Team", "ref", required=True, ref="team"),
-        Field("product_group_id", "Product group", "ref", required=True, ref="product_group"),
-        Field("sku_id", "SKU", "ref", required=True, ref="sku", cols=["PRODUCT_ID"],
-              narrow={"param": "product_group_id", "from": "product_group_id"}),
-    ], label=lambda o: f"#{o.id}", search=[],
-        order=["customer_id", "product_group_id", "sku_id"],
-        unique=[(("year_id", "customer_id", "sku_id"),
-                 "That customer's SKU is already assigned in this year. Edit that row instead.")],
-        validate=v_customer_assignment, bulk_by_sku=True, year_bound=True,
-        sheets=["CUSTOMER_ALIGNMENT", "CUSTOMER_ASSIGNMENT"],
-        description="Kept at SKU level: one row per customer per SKU per year, naming the "
-                    "territory and team that cover it. The team must carry the product group "
-                    "and cover the territory's HQ in that year."),
+    # ------------------- assignment: the old system's assignment tables
+    *[_assignment_spec(*a) for a in ASSIGNMENT_SPECS],
 
-    Spec("employee_assignment", "Employee alignment", "Alignment", X.EmployeeAssignment, [
-        *_c(YEAR),
-        Field("employee_id", "Employee", "ref", required=True, ref="employee", cols=["EMPLOYEE_ID"]),
-        Field("territory_id", "Territory", "ref", required=True, ref="territory"),
-        Field("product_group_id", "Product group", "ref", required=True, ref="product_group"),
-        Field("sku_id", "SKU", "ref", required=True, ref="sku", cols=["PRODUCT_ID"],
-              narrow={"param": "product_group_id", "from": "product_group_id"}),
-    ], label=lambda o: f"#{o.id}", search=[],
-        order=["employee_id", "territory_id", "sku_id"],
-        unique=[(("year_id", "employee_id", "territory_id", "sku_id"),
-                 "That employee already has that SKU in that territory this year.")],
-        validate=v_employee_assignment, bulk_by_sku=True, year_bound=True,
-        sheets=["EMPLOYEE_ALIGNMENT", "EMPLOYEE_ASSIGNMENT"],
-        description="Kept at SKU level: one row per employee per territory per SKU per year."),
+    Spec("team_pg_hq", "Team PG HQ assignment", "Assignment", X.TeamPgHqAssignment, [
+        Field("id", "S_NO", "int", create_only=True, help="Left blank, the next number is given."),
+        _keyed("team_id", "TEAM_ID", "team"),
+        Field("team_name", "TEAM_NAME", in_list=False, help="Left blank, filled from TEAM_ID."),
+        _keyed("product_group_id", "PRODUCT_GROUP_ID", "product_group"),
+        Field("product_group_name", "PRODUCT_GROUP_NAME", in_list=False,
+              help="Left blank, filled from PRODUCT_GROUP_ID."),
+        _keyed("hq_id", "HQ_ID", "headquarter"),
+        Field("hq_name", "HQ_NAME", in_list=False, help="Left blank, filled from HQ_ID."),
+    ], label=lambda o: f"#{o.id}", search=["team_name", "product_group_name", "hq_name"],
+        order=["team_id", "product_group_id", "hq_id"], validate=v_team_pg_hq,
+        unique=[(("team_id", "product_group_id", "hq_id"),
+                 "That team already has that product group in that HQ.")],
+        filters=["team_id", "product_group_id", "hq_id"], sheets=["TEAM_PG_HQ_ASSIGNMENT"],
+        description="TEAM_PG_HQ_ASSIGNMENT: which product group each team promotes in which HQ."),
+
+    # ------------------------------------------------- sales and budget
+    Spec("sales", "Sales", "Sales & budget", X.SalesMapping,
+         [*_c(ID_FIELD), *_table_fields(X.SALES_COLUMNS, SALES_LISTED)],
+         label=lambda o: f"{o.id} — {o.customer_name or ''} · {o.product_name or ''}",
+         search=SALES_SEARCH, order=["-id"], bulk=True, match=("id",),
+         filters=["year", "month", "dist_name", "hq_id", "product_group_id"],
+         sheets=["MAPPING_MASTER", "SALES", "SALES_MASTER"],
+         description="MAPPING_MASTER: every sales line, one row per invoice line, with the IDs "
+                     "and names of the product, customer, HQ and territory it was mapped to. "
+                     "A row is found again by its ID, so uploading the same file twice adds nothing."),
+
+    Spec("mid_sales", "Mid sales", "Sales & budget", X.MidSalesMapping,
+         [*_c(ID_FIELD), *_table_fields(X.MID_SALES_COLUMNS, SALES_LISTED + ["MID"])],
+         label=lambda o: f"{o.id} — {o.customer_name or ''} · {o.product_name or ''}",
+         search=SALES_SEARCH, order=["-id"], bulk=True, match=("id",),
+         filters=["year", "month", "dist_name", "hq_id", "product_group_id"],
+         sheets=["MAPPING_MASTER_MID", "MID_SALES", "MIDSALES", "MID_MONTH_SALES"],
+         description="MAPPING_MASTER_MID: the mid-month sales, the same columns as Sales plus MID."),
+
+    Spec("budget", "Budget", "Sales & budget", X.Budget,
+         _table_fields(X.BUDGET_COLUMNS, BUDGET_LISTED, required=["S_NO", "EMPLOYEE_ID", "HQ_ID"]),
+         label=lambda o: f"{o.s_no} — {o.product_name or ''} ({o.hq_name or ''}, {o.target_year})",
+         search=["product_name", "product_brand", "product_group", "hq_name"],
+         order=["-target_year", "employee_id", "s_no"], bulk=True,
+         match=("s_no", "employee_id", "hq_id"),
+         unique=[(("s_no", "employee_id", "hq_id"),
+                  "That S_NO already has a row for this employee and HQ. Edit that row instead.")],
+         filters=["target_year", "employee_id", "hq_id", "product_group_id"],
+         sheets=["BUDGET_MASTER", "BUDGET_MASTER_TEST_NEW", "BUDGET", "BUDGETS"],
+         description="BUDGET_MASTER: target units and value by month, with the actuals, mid-month "
+                     "actuals, expiry and returns beside them. S_NO repeats across the HQs and "
+                     "employees a line is split over, so a row is S_NO + EMPLOYEE_ID + HQ_ID."),
 ]
+
+
+# ===================================================== the old system's layout
+# Each screen as the old Abbott application had it: its name, the menu column it
+# sits in (Administration: Organisation structure, Product, Master data, Others;
+# then Assignment, Budgeting, Sales) and its list columns. The order here is the
+# menu's order; the order of SPECS above (parents first) is the upload's.
+def _cols(*cols):
+    return [Col(label, path, primary) for label, path, *rest in cols for primary in [bool(rest)]]
+
+
+A = "Active Status", "active"
+LAYOUT = {
+    # ---------------------------------------------- Organisation structure
+    "company": ("Company", "Organisation structure",
+                _cols(("Company Id", "id"), ("Company", "name", 1), A)),
+    "zone": ("Zone", "Organisation structure",
+             _cols(("Zone Id", "legacy_id"), ("Zone Name", "name", 1), A)),
+    "headquarter": ("Head Quarter", "Organisation structure",
+                    _cols(("HQ Id", "legacy_id"), ("HQ Name", "name", 1), ("Zone", "zone_id"), A)),
+    "territory": ("Territory", "Organisation structure",
+                  _cols(("Zone", "headquarter_id>zone_id"), ("HQ", "headquarter_id"),
+                        ("Territory Id", "legacy_id"), ("Territory Name", "name", 1), A)),
+    # ------------------------------------------------------------- Product
+    "product_group": ("Division/Product Group", "Product",
+                      _cols(("Product Group Id", "legacy_id"), ("Product Group Name", "name", 1), A)),
+    "brand": ("Product Brand", "Product",
+              _cols(("Product Group Name", "product_group_id"), ("Product Brand Id", "id"),
+                    ("Product Brand Name", "product_brand_name", 1), ("Team", "team_id"),
+                    ("Reporting", "reporting"), A)),
+    "reporting": ("Product Reporting", "Product",
+                  _cols(("Reporting Id", "id"), ("Reporting", "reporting", 1), A)),
+    "sku": ("SKU", "Product",
+            _cols(("Product Group Name", "product_group_id|product_brand_id>product_group_id"),
+                  ("Product Brand Name", "product_brand_id"), ("Product Id", "id"),
+                  ("Product Name", "sap_product_name", 1), ("Team", "product_brand_id>team_id"),
+                  ("Reporting", "product_brand_id>reporting"), ("NRV", "nrv"), A)),
+    # --------------------------------------------------------- Master data
+    "customer": ("Customer/Hospital", "Master data",
+                 _cols(("Customer Id", "id"), ("Customer Name", "customer_name", 1),
+                       ("Customer Classification", "cust_classification_id"), A)),
+    "customer_classification": ("Customer Classification", "Master data",
+                                _cols(("Customer Classification Id", "id"),
+                                      ("Customer Classification", "description", 1), A)),
+    "distributor": ("Distributor/Vendor", "Master data",
+                    _cols(("Distributor Id", "id"), ("Distributor Name", "name", 1), A)),
+    "employee": ("Employee", "Master data",
+                 _cols(("Employee Id", "id"), ("Employee SAP Id", "employee_code"),
+                       ("Employee Name", "full_name", 1), ("Email", "email"),
+                       ("Role", "role_id"), ("Designation", "designation_id"), ("Team", "team"),
+                       ("Reporting Manager", "reporting_manager_id"), A)),
+    # -------------------------------------------------------------- Others
+    "country": ("Country", "Others", _cols(("Country Id", "id"), ("Country", "name", 1), A)),
+    "designation": ("Designation", "Others",
+                    _cols(("Designation Id", "legacy_id"), ("Designation", "name", 1), A)),
+    "role": ("Role", "Others", _cols(("Role Id", "legacy_id"), ("Role", "name", 1), A)),
+    "team": ("Team", "Others", _cols(("Team Id", "legacy_id"), ("Team Name", "name", 1), A)),
+    "year": ("Year", "Others", _cols(("Year Id", "id"), ("Year", "year_number", 1), A)),
+    "currency_rate": ("Currency rates", "Others", []),
+    "company_country": ("Company › Countries", "Others",
+                        _cols(("Company", "company_id", 1), ("Country", "country_id"))),
+    # ---------------------------------------------------------- Assignment
+    "customer_terr_assignment": ("Customer Territory", "Assignment",
+                                 _cols(("Customer Name", "customer_id", 1), ("HQ", "hq_id"),
+                                       ("Territory", "territory_id"),
+                                       ("Product Group", "product_group_id"), ("Team", "team_id"))),
+    "customer_pg_assignment": ("Customer Product", "Assignment",
+                               _cols(("Customer Name", "customer_id", 1),
+                                     ("Product Group", "product_group_id"),
+                                     ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
+    "employee_terr_assignment": ("Employee Territory", "Assignment",
+                                 _cols(("Employee Name", "employee_id", 1), ("HQ", "hq_id"),
+                                       ("Territory", "territory_id"))),
+    "employee_pg_assignment": ("Employee Product", "Assignment",
+                               _cols(("Employee Name", "employee_id", 1),
+                                     ("Product Group", "product_group_id"),
+                                     ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
+    "team_pg_hq": ("Team PG HQ", "Assignment",
+                   _cols(("Team", "team_id|team_name", 1), ("Product Group", "product_group_id|product_group_name"),
+                         ("HQ", "hq_id|hq_name"))),
+    # ----------------------------------------------------- Budgeting, Sales
+    "budget": ("Budget", "Budgeting", []),
+    "sales": ("Sales", "Sales", []),
+    "mid_sales": ("Mid sales", "Sales", []),
+}
+MENU_ORDER = list(LAYOUT)
+
+for _s in SPECS:
+    _t, _g, _v = LAYOUT[_s.slug]
+    _s.title, _s.group, _s.view = _t, _g, (_v or V.default(_s))
 
 BY_SLUG: dict[str, Spec] = {s.slug: s for s in SPECS}
 
@@ -604,11 +685,13 @@ def get(slug: str) -> Spec:
 def meta() -> list[dict]:
     """What the screens need to draw themselves — no callables."""
     out = []
-    for s in SPECS:
+    for s in sorted(SPECS, key=lambda s: MENU_ORDER.index(s.slug)):     # the menu's order
         out.append({
             "slug": s.slug, "title": s.title, "group": s.group, "description": s.description,
-            "bulk_by_sku": s.bulk_by_sku, "year_bound": s.year_bound,
+            "view": [{"label": c.label, "kind": V.kind(s, c.path), "primary": c.primary}
+                     for c in s.view],
             "searchable": bool(s.search), "master_id": s.master_id,
+            "bulk": s.bulk, "filters": s.filters,
             "table": s.model.__tablename__,
             "fields": [{k: v for k, v in vars(f).items()} for f in s.fields],
         })

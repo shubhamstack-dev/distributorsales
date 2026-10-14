@@ -6,7 +6,9 @@
 
 One workbook can carry every master — MASTER DATA & TABLES.xlsx with its
 CUSTOMER_MASTER, EMPLOYEE_MASTER, PRODUCT_MASTER_BRAND and PRODUCT_MASTER
-sheets is read as it is — or a file per master. Sheets are read parents first
+sheets is read as it is, and so is the workbook of the old system's data tables
+(MAPPING_MASTER, MAPPING_MASTER_MID, BUDGET_MASTER and the four *_ASSIGNMENT
+tables, which go through services/bulk_load.py) — or a file per master. Sheets are read parents first
 (zones before HQs, brands before products), whatever order they come in.
 
 Rules it keeps:
@@ -35,6 +37,7 @@ from sqlalchemy.orm import Session
 from .. import config
 from ..database import get_db
 from ..masters import specs as S
+from ..services import bulk_load
 from ..services import master_io as IO
 from .masters import _maxlen, _validate, f_named, next_master_id
 
@@ -355,7 +358,10 @@ def run_upload(db: Session, files: list[tuple[str, bytes]], dry_run: bool = True
     tallies = []
     try:
         for spec, label, rows in found:
-            tallies.append(Sheet(db, spec, label, rows).run())
+            if spec.bulk:                         # sales, budget, the assignment tables
+                tallies.append(bulk_load.load(db, spec, label, rows, dry_run))
+            else:
+                tallies.append(Sheet(db, spec, label, rows).run())
         if dry_run:
             db.rollback()
         else:
@@ -398,7 +404,9 @@ def _xlsx(data: bytes, name: str) -> Response:
 
 @router.get("/masters/export-all")
 def export_all(db: Session = Depends(get_db)):
-    return _xlsx(IO.export(db, S.SPECS), "MASTER_DATA.xlsx")
+    # Sales, mid sales and the budget run to a hundred thousand rows and are not
+    # masters; each downloads from its own screen.
+    return _xlsx(IO.export(db, [s for s in S.SPECS if not s.bulk]), "MASTER_DATA.xlsx")
 
 
 @router.get("/masters/{slug}/export")

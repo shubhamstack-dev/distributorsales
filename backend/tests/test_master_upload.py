@@ -173,7 +173,7 @@ def test_export_is_the_workbook_and_reads_back_in(h):
     every = c.get("/api/masters/export-all", headers=h)
     names = openpyxl.load_workbook(io.BytesIO(every.content)).sheetnames
     assert {"CUSTOMER_MASTER", "EMPLOYEE_MASTER", "PRODUCT_MASTER_BRAND", "PRODUCT_MASTER",
-            "Zones"} <= set(names)
+            "Zone"} <= set(names)
     r = ok(send(h, [("MASTER_DATA.xlsx", every.content)]))
     assert all(x["skipped"] == 0 and x["added"] == 0 for x in r["tables"]), \
         [(x["slug"], x["errors"][:2]) for x in r["tables"] if x["skipped"] or x["added"]]

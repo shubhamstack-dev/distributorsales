@@ -7,8 +7,6 @@
     PUT    /api/masters/{slug}/{id}             change
     DELETE /api/masters/{slug}/{id}             remove, refused while anything points at it
     POST   /api/masters/{slug}/delete-many      remove several
-    POST   /api/masters/{slug}/bulk             alignment: one row per SKU of a group
-    POST   /api/masters/{slug}/copy-year        alignment: last year's rows into this year
     POST   /api/masters/upload                  Excel/CSV into any master(s): check, then import
     GET    /api/masters/{slug}/export           one master as .xlsx (also the upload template)
     GET    /api/masters/export-all              every master, one sheet each
@@ -28,6 +26,7 @@ from .. import models_master as X
 from ..database import get_db
 from ..services import master_io
 from ..masters import specs as S
+from ..masters import view as V
 from ..masters.specs import Spec, bad
 
 router = APIRouter(prefix="/api")
@@ -240,6 +239,9 @@ def _filtered(spec: Spec, sel, params):
             sel = spec.option_filters[k](sel, v)
             continue
         f = next((x for x in spec.fields if x.name == k), None)
+        if f and f.type == "text" and k in spec.filters:      # e.g. Sales by DIST_NAME
+            sel = sel.where(func.upper(_col(spec, k)) == str(v).strip().upper())
+            continue
         if f and f.type in ("ref", "int", "select", "bool", "code"):
             try:
                 val = int(v) if f.type in ("ref", "int", "bool") else str(v).upper() \
@@ -326,8 +328,10 @@ def list_rows(slug: str, request: Request, q: str | None = None, page: int = 1,
     rows = db.execute(_ordered(spec, sel).offset((max(page, 1) - 1) * size).limit(size)) \
         .scalars().all()
     labels = _labels(db, spec, rows)
-    return {"total": total, "page": page, "size": size,
-            "rows": [_out(spec, r, labels) for r in rows]}
+    out = [_out(spec, r, labels) for r in rows]
+    for d, cells in zip(out, V.rows(db, spec, rows)):   # the columns the screen shows
+        d["__view"] = cells
+    return {"total": total, "page": page, "size": size, "rows": out}
 
 
 @router.post("/masters/{slug}", status_code=201)
@@ -393,102 +397,6 @@ def delete_many(slug: str, body: dict = Body(...), db: Session = Depends(get_db)
     return {"deleted": len(ids)}
 
 
-@router.post("/masters/{slug}/bulk")
-def bulk(slug: str, body: dict = Body(...), db: Session = Depends(get_db)):
-    """Assign every active SKU of a product group (or one brand of it) in one go.
-    Rows that already exist are left alone and counted as skipped."""
-    spec = S.get(slug)
-    if not spec.bulk_by_sku:
-        bad("This master is not kept at SKU level.")
-    pg = body.get("product_group_id")
-    if not pg:
-        bad("Choose a product group.")
-    P = X.ProductMaster
-    sel = S._sku_by_group(select(P.id), pg).where(P.active == 1)
-    if body.get("brand_id"):
-        sel = sel.where(P.product_brand_id == int(body["brand_id"]))
-    if body.get("sku_ids"):
-        sel = sel.where(P.id.in_([int(i) for i in body["sku_ids"]]))
-    skus = db.execute(sel.order_by(P.sap_product_name)).scalars().all()
-    if not skus:
-        bad("That product group has no active products to assign. A product belongs to the "
-            "group whose Master ID is its PRODUCT_GROUP_ID.")
-    created = skipped = 0
-    try:
-        for sid in skus:
-            obj = spec.model()
-            obj.id = None
-            _apply(db, spec, obj, {**body, "sku_id": sid}, creating=True)
-            if spec.validate:
-                spec.validate(db, obj)          # a bad team or year stops the lot
-            try:
-                _check_unique(db, spec, obj)
-            except HTTPException:
-                skipped += 1
-                continue
-            db.add(obj)
-            db.flush()
-            created += 1
-        db.commit()
-    except HTTPException:
-        db.rollback()
-        raise
-    return {"created": created, "skipped": skipped, "skus": len(skus)}
-
-
-@router.post("/masters/{slug}/copy-year")
-def copy_year(slug: str, body: dict = Body(...), db: Session = Depends(get_db)):
-    """Start a year from the one before: copy its rows, skipping any that are
-    already there or that do not hold in the new year (with the reason)."""
-    spec = S.get(slug)
-    if not spec.year_bound:
-        bad("This master is not kept by year.")
-    src, dst = int(body.get("from_year_id") or 0), int(body.get("to_year_id") or 0)
-    if not (db.get(X.Year, src) and db.get(X.Year, dst)):
-        bad("Choose both years.")
-    if src == dst:
-        bad("Copy from a different year.")
-    S._year_rows_ok(db, dst)
-    created, skipped, reasons = 0, 0, []
-    idmap: dict[int, int] = {}
-    keep = [f.name for f in spec.fields if not f.derived and f.name != "year_id"] + \
-        (["active"] if _has_active(spec) and "active" not in [f.name for f in spec.fields] else [])
-    rows = db.execute(select(spec.model).where(spec.model.year_id == src)
-                      .order_by(spec.model.id)).scalars().all()
-    for r in rows:
-        obj = spec.model()
-        obj.id = None
-        for k in keep:
-            setattr(obj, k, getattr(r, k))
-        obj.year_id = dst
-        try:
-            _validate(db, spec, obj)
-        except HTTPException as e:
-            skipped += 1
-            if len(reasons) < 5 and e.detail not in reasons:
-                reasons.append(e.detail)
-            continue
-        db.add(obj)
-        db.flush()
-        idmap[r.id] = obj.id
-        created += 1
-    # a reporting line brings its SKUs with it
-    if slug == "product_reporting":
-        for m in db.execute(select(X.ProductReportingSku)
-                            .where(X.ProductReportingSku.year_id == src)).scalars().all():
-            if m.product_reporting_id not in idmap:
-                continue
-            if db.execute(select(X.ProductReportingSku.id).where(
-                    X.ProductReportingSku.year_id == dst,
-                    X.ProductReportingSku.sku_id == m.sku_id)).first():
-                continue
-            db.add(X.ProductReportingSku(product_reporting_id=idmap[m.product_reporting_id],
-                                         sku_id=m.sku_id, year_id=dst))
-    db.commit()
-    return {"created": created, "skipped": skipped, "reasons": reasons}
-
-
-# ================================================================ currency
 def rate_on(db: Session, frm: str, to: str, on: date) -> dict:
     frm, to = frm.upper(), to.upper()
     if frm == to:

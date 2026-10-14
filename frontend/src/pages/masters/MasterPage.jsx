@@ -3,6 +3,7 @@ import { api } from '../../api.js'
 import RefSelect, { forgetOptions } from './RefSelect.jsx'
 import CurrencyTool from './CurrencyTool.jsx'
 import UploadReport from './UploadReport.jsx'
+import { menuOf } from './meta.js'
 
 const SIZE = 50
 
@@ -14,8 +15,10 @@ const PATHS = {
   brand: ['Product group', 'Brand'], sku: ['Product group', 'Brand', 'Product'],
   customer: ['Zone', 'HQ', 'Territory', 'Customer'],
   product_reporting_sku: ['Reporting line (P1 / P2 / X)', 'SKU'],
-  customer_assignment: ['Year', 'Customer', 'Territory + Team', 'Product group', 'SKU'],
-  employee_assignment: ['Year', 'Employee', 'Territory', 'Product group', 'SKU'],
+  customer_terr_assignment: ['Customer', 'Product group', 'Territory, HQ + Team'],
+  customer_pg_assignment: ['Customer', 'Product group', 'Brand', 'Product'],
+  employee_terr_assignment: ['Employee', 'HQ', 'Territory'],
+  employee_pg_assignment: ['Employee', 'Product group', 'Brand', 'Product'],
 }
 
 /** "Territories" -> "territory", "Team › Product groups" -> "product group", "SKUs" -> "SKU". */
@@ -49,19 +52,16 @@ function toBody(spec, form, skip = [], editing = false) {
   return b
 }
 
-function Cell({ f, row }) {
-  const v = row[f.name]
-  if (f.type === 'aliases') {
-    if (!v?.length) return <span className="faint">None</span>
-    return <span title={v.join('\n')}>{v[0]}{v.length > 1 && <span className="aliascount"> and {v.length - 1} more</span>}</span>
+/** One cell of the list, drawn as the old screens drew it: the row's own name
+ *  stands out, parents by name, Active Status as a True / False badge. */
+function ViewCell({ c, v }) {
+  if (c.kind === 'bool') {
+    return v ? <span className="chip ok">True</span> : <span className="chip off">False</span>
   }
-  if (f.type === 'ref') return v ? (row[`${f.name}__label`] || `#${v}`) : <span className="faint">—</span>
-  if (f.type === 'bool') return v ? <span className="chip ok">Yes</span> : <span className="chip mute">No</span>
-  if (f.name === 'flag') return <span className={`chip flag-${v}`}>{v === 'X' ? 'X · Others' : v}</span>
   if (v === null || v === undefined || v === '') return <span className="faint">—</span>
-  if (f.name === 'id') return <span className="num">{v}</span>
-  if (f.type === 'decimal') return <span className="mono">{Number(v).toLocaleString('en-IN', { maximumFractionDigits: 6 })}</span>
-  if (f.type === 'code' || f.type === 'date' || f.type === 'int') return <span className="mono">{v}</span>
+  if (c.primary) return <span className="primary-name">{v}</span>
+  if (c.kind === 'num') return <span className="mono">{Number(v).toLocaleString('en-IN', { maximumFractionDigits: 6 })}</span>
+  if (c.kind === 'id' || c.kind === 'int' || c.kind === 'date') return <span className="mono">{v}</span>
   return String(v)
 }
 
@@ -135,21 +135,39 @@ function Input({ f, form, set, spec, row }) {
   )
 }
 
+/** A typed-in filter (a year, a distributor's name): applied once typing
+ *  pauses, so a year is not looked up digit by digit. */
+function TypedFilter({ f, value, onChange }) {
+  const [v, setV] = useState(value)
+  useEffect(() => { setV(value) }, [value])
+  useEffect(() => {
+    if (String(v) === String(value)) return undefined
+    const t = setTimeout(() => onChange(String(v).trim()), 450)
+    return () => clearTimeout(t)
+  }, [v]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input type={f.type === 'int' ? 'number' : 'search'} value={v} placeholder="All"
+           inputMode={f.type === 'int' ? 'numeric' : undefined}
+           onChange={(e) => setV(e.target.value)}
+           onKeyDown={(e) => { if (e.key === 'Enter') onChange(String(v).trim()) }} />
+  )
+}
+
 export default function MasterPage({ spec }) {
   const refFields = spec.fields.filter((f) => f.type === 'ref')
-  const hasYear = refFields.some((f) => f.name === 'year_id')
   const hasActive = spec.fields.some((f) => f.name === 'active')
-  const filterFields = useMemo(() => [...refFields]
-    .sort((a, b) => (b.name === 'year_id') - (a.name === 'year_id')).slice(0, 4),
+  // the spec names its filters (Sales: year, month, distributor …); else the first four refs
+  const filterFields = useMemo(() => (spec.filters?.length
+    ? spec.filters.map((n) => spec.fields.find((f) => f.name === n)).filter(Boolean)
+    : refFields.slice(0, 4)),
   [spec.slug]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [filters, setFilters] = useState({})
-  const [ready, setReady] = useState(!hasYear)
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [data, setData] = useState({ rows: [], total: 0 })
   const [sel, setSel] = useState(new Set())
-  const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'bulk' | 'copy'
+  const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'upload'
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({})
   const [msg, setMsg] = useState(null)
@@ -158,21 +176,12 @@ export default function MasterPage({ spec }) {
   const [report, setReport] = useState(null)
   const filePick = useRef(null)
 
-  // year-bound screens open on the current year, which is what people edit
-  useEffect(() => {
-    if (!hasYear) return
-    api.masterList('year', { is_current: 1, size: 1 })
-      .then((r) => { if (r.rows[0]) setFilters({ year_id: r.rows[0].id }) })
-      .finally(() => setReady(true))
-  }, [hasYear])
-
   function load() {
-    if (!ready) return
     api.masterList(spec.slug, { ...filters, q, page, size: SIZE })
       .then((r) => { setData(r); setSel(new Set()) })
       .catch((e) => setMsg({ bad: true, t: e.message }))
   }
-  useEffect(load, [ready, filters, q, page]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [filters, q, page]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const say = (t, bad = false) => setMsg({ t, bad })
   const set = (name, value) => setForm((f) => {
@@ -190,8 +199,6 @@ export default function MasterPage({ spec }) {
     }
     setEditing(row); setForm(f); setMode('edit'); setMsg(null)
   }
-  function openBulk() { setForm(blankForm(spec, filters)); setMode('bulk'); setMsg(null) }
-  function openCopy() { setForm({ to_year_id: filters.year_id || null }); setMode('copy'); setMsg(null) }
   const close = () => { setMode(null); setEditing(null); setReport(null) }
 
   async function upload(dry, list = upFiles) {
@@ -226,20 +233,6 @@ export default function MasterPage({ spec }) {
     }
   }) }
 
-  const bulk = (e) => { e.preventDefault(); run(async () => {
-    const r = await api.masterBulk(spec.slug, { ...toBody(spec, form, ['sku_id']), brand_id: form.brand_id || null })
-    forgetOptions(); load()
-    say(`Assigned ${r.created} SKU${r.created === 1 ? '' : 's'}` +
-        (r.skipped ? `; ${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already assigned and left as they were.` : '.'))
-  }) }
-
-  const copy = (e) => { e.preventDefault(); run(async () => {
-    const r = await api.masterCopyYear(spec.slug, form)
-    forgetOptions(); load()
-    say(`Copied ${r.created} row${r.created === 1 ? '' : 's'}.` +
-        (r.skipped ? ` ${r.skipped} skipped: ${r.reasons.join(' ')}` : ''), r.created === 0 && r.skipped > 0)
-  }) }
-
   const remove = (row) => {
     if (!window.confirm(`Delete ${row.__label?.startsWith('#') ? 'this row' : row.__label}?`)) return
     run(async () => { await api.masterDelete(spec.slug, row.id); forgetOptions(); say('Deleted.'); load() })
@@ -252,7 +245,6 @@ export default function MasterPage({ spec }) {
     })
   }
 
-  const cols = spec.fields.filter((f) => f.in_list && !(f.derived && hasYear && f.name !== 'year_id'))
   const pages = Math.max(1, Math.ceil(data.total / SIZE))
   const allOn = data.rows.length > 0 && data.rows.every((r) => sel.has(r.id))
   const path = PATHS[spec.slug]
@@ -262,6 +254,8 @@ export default function MasterPage({ spec }) {
     <div className="page master">
       <div className="head">
         <div>
+          <p className="crumb">{menuOf(spec.group)}{menuOf(spec.group) !== spec.group &&
+            <><span aria-hidden="true">/</span>{spec.group}</>}</p>
           <h1>{spec.title}</h1>
           {spec.table === spec.table.toUpperCase() && <div className="tablename">Table {spec.table}</div>}
           {spec.description && <p className="lead">{spec.description}</p>}
@@ -281,10 +275,17 @@ export default function MasterPage({ spec }) {
                  onChange={(e) => { setPage(1); setQ(e.target.value) }} aria-label="Search" />
         )}
         {filterFields.map((f) => (
-          <label key={f.name} className="filter">
+          <label key={f.name} className={`filter${f.type === 'int' ? ' narrow' : ''}`}>
             <span>{f.label}</span>
-            <RefSelect slug={f.ref} value={filters[f.name] || null} blank="All" keyBy={f.key}
-                       includeInactive onChange={(v) => setFilter(f.name, v)} />
+            {f.type === 'ref'
+              ? <RefSelect slug={f.ref} value={filters[f.name] || null} blank="All" keyBy={f.key}
+                           includeInactive onChange={(v) => setFilter(f.name, v)} />
+              : f.type === 'select'
+                ? <select value={filters[f.name] ?? ''} onChange={(e) => setFilter(f.name, e.target.value)}>
+                    <option value="">All</option>
+                    {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                : <TypedFilter f={f} value={filters[f.name] ?? ''} onChange={(v) => setFilter(f.name, v)} />}
           </label>
         ))}
         {hasActive && (
@@ -299,8 +300,6 @@ export default function MasterPage({ spec }) {
                  onChange={(e) => { const l = [...e.target.files]; e.target.value = ''; setUpFiles(l); upload(true, l) }} />
           <button className="btn" onClick={() => api.masterExport(spec.slug).catch((e) => say(e.message, true))}>
             Download Excel</button>
-          {spec.year_bound && <button className="btn" onClick={openCopy}>Copy from a year</button>}
-          {spec.bulk_by_sku && <button className="btn" onClick={openBulk}>Assign a whole group</button>}
           <button className="btn primary" onClick={openAdd}>Add {singular(spec.title)}</button>
         </div>
       </div>
@@ -331,74 +330,40 @@ export default function MasterPage({ spec }) {
         </section>
       )}
 
-      {mode === 'bulk' && (
-        <form className="panel editor" onSubmit={bulk}>
-          <h3>Assign every product of a group</h3>
-          <p className="fine">One row is added per active product. Products already assigned are left as they are.
-            Narrow it to one brand if only part of the group applies.</p>
-          <div className="grid2">
-            {editable(spec).filter((f) => f.name !== 'sku_id')
-              .map((f) => <Input key={f.name} f={f} form={form} set={set} spec={spec} />)}
-            <label htmlFor="f-brand"><span>Only this brand</span>
-              <RefSelect id="f-brand" slug="brand" value={form.brand_id || null} blank="Every brand"
-                         params={{ product_group_id: form.product_group_id }}
-                         waitingFor={!form.product_group_id ? 'product group' : null}
-                         onChange={(v) => setForm((f) => ({ ...f, brand_id: v }))} /></label>
-          </div>
-          <div className="actions">
-            <button className="btn primary" disabled={busy}>Assign products</button>
-            <button type="button" className="btn" onClick={close}>Close</button>
-          </div>
-        </form>
-      )}
-
-      {mode === 'copy' && (
-        <form className="panel editor" onSubmit={copy}>
-          <h3>Start a year from another</h3>
-          <p className="fine">Copies every row of one year into another. Rows already there, or that
-            no longer hold in the new year, are skipped and the reason is shown.
-            {spec.slug === 'product_reporting' && ' Each line brings its SKUs with it.'}</p>
-          <div className="grid2">
-            <label><span>From year</span>
-              <RefSelect slug="year" value={form.from_year_id || null} includeInactive
-                         onChange={(v) => setForm((f) => ({ ...f, from_year_id: v }))} /></label>
-            <label><span>Into year</span>
-              <RefSelect slug="year" value={form.to_year_id || null}
-                         onChange={(v) => setForm((f) => ({ ...f, to_year_id: v }))} /></label>
-          </div>
-          <div className="actions">
-            <button className="btn primary" disabled={busy || !form.from_year_id || !form.to_year_id}>Copy rows</button>
-            <button type="button" className="btn" onClick={close}>Close</button>
-          </div>
-        </form>
-      )}
-
       <div className="listbar">
         <span className="muted">{data.total.toLocaleString('en-IN')} row{data.total === 1 ? '' : 's'}</span>
         {sel.size > 0 && <button className="btn sm danger" onClick={removeMany} disabled={busy}>Delete {sel.size} selected</button>}
       </div>
       <div className="scroll">
-        <table>
+        <table className="grid-old">
           <thead><tr>
             <th className="sel"><input type="checkbox" aria-label="Select all on this page" checked={allOn}
               onChange={() => setSel(allOn ? new Set() : new Set(data.rows.map((r) => r.id)))} /></th>
-            {cols.map((f) => <th key={f.name} className={f.type === 'decimal' ? 'r' : ''}>{f.label}</th>)}
-            <th />
+            <th className="sno">S.No</th>
+            {spec.view.map((c) => <th key={c.label} className={c.kind === 'num' ? 'r' : ''}>{c.label}</th>)}
+            <th className="r">View More</th>
           </tr></thead>
           <tbody>
-            {data.rows.map((row) => (
+            {data.rows.map((row, i) => (
               <tr key={row.id} className={row.active === 0 ? 'off' : ''}>
                 <td className="sel"><input type="checkbox" aria-label="Select row" checked={sel.has(row.id)}
                   onChange={() => setSel((s) => { const n = new Set(s); n.has(row.id) ? n.delete(row.id) : n.add(row.id); return n })} /></td>
-                {cols.map((f) => <td key={f.name} className={f.type === 'decimal' ? 'r' : ''}><Cell f={f} row={row} /></td>)}
+                <td className="sno">{(page - 1) * SIZE + i + 1}</td>
+                {spec.view.map((c, ci) => (
+                  <td key={c.label} className={c.kind === 'num' ? 'r' : ''}><ViewCell c={c} v={row.__view?.[ci]} /></td>
+                ))}
                 <td className="row-actions"><div>
-                  <button className="btn sm" onClick={() => openEdit(row)}>Edit</button>
-                  <button className="btn sm danger" onClick={() => remove(row)}>Delete</button>
+                  <button className="icon-btn" title="View more / edit" aria-label="View more" onClick={() => openEdit(row)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></svg>
+                  </button>
+                  <button className="icon-btn danger" title="Delete" aria-label="Delete" onClick={() => remove(row)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12h10l1-12M9 7V4h6v3" /></svg>
+                  </button>
                 </div></td>
               </tr>
             ))}
             {!data.rows.length && (
-              <tr><td colSpan={cols.length + 2} className="empty">
+              <tr><td colSpan={spec.view.length + 3} className="empty">
                 {q || Object.values(filters).some(Boolean)
                   ? 'Nothing matches. Clear the search or filters to see every row.'
                   : <>Nothing here yet. <button className="linkish" onClick={openAdd}>Add the first one</button>.</>}

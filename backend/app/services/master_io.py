@@ -108,11 +108,34 @@ def _cell(v):
     return v
 
 
+def _read_calamine(stem: str, data: bytes):
+    """The same sheets through calamine, which reads a 100,000-row workbook in a
+    few seconds where openpyxl takes over half a minute. None if it is not
+    installed or cannot open the file, and openpyxl reads it instead."""
+    try:
+        from python_calamine import CalamineWorkbook
+    except ImportError:
+        return None
+    try:
+        wb = CalamineWorkbook.from_filelike(io.BytesIO(data))
+        names = wb.sheet_names
+        out = []
+        for title in names:
+            raw = wb.get_sheet_by_name(title).to_python(skip_empty_area=False)
+            out.append((stem, title, [[_cell(v) for v in r] for r in raw], len(names)))
+        return out
+    except Exception:
+        return None
+
+
 def read_tables(name: str, data: bytes) -> list[tuple[str, str, list[list], int]]:
     """(file stem, sheet title, rows, sheets in the file) for every sheet."""
     stem = re.sub(r"\.[^.]+$", "", re.split(r"[\\/]", name)[-1])
     low = name.lower()
     if low.endswith((".xlsx", ".xlsm")):
+        fast = _read_calamine(stem, data)
+        if fast is not None:
+            return fast
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         try:
             out = []
@@ -232,8 +255,6 @@ def natural_key(spec, o):
         return o.legacy_id
     if is_excel_table(spec):
         return o.id
-    if spec.slug == "year":
-        return o.year_value
     if hasattr(o, "code") and getattr(o, "code", None):
         return o.code
     if hasattr(o, "name"):
@@ -259,10 +280,6 @@ def find_row(db: Session, spec, value, year_id=None):
                 return r
         elif is_excel_table(spec):
             return db.get(m, num)
-        elif spec.slug == "year":
-            r = db.execute(select(m).where(m.year_value == num)).scalars().first()
-            if r is not None:
-                return r
     text = to_text(value).upper()
     if "code" in m.__mapper__.attrs:
         q = select(m).where(func.upper(m.code) == text)
@@ -331,7 +348,43 @@ def _sheet_title(spec) -> str:
     return re.sub(r"[:\\/?*\[\]]", "-", t)[:31]
 
 
+def _export_bulk(db: Session, spec) -> bytes:
+    """A data table of up to a hundred thousand rows, streamed: openpyxl's
+    write-only mode, rows read from the database in batches as tuples."""
+    from openpyxl.cell import WriteOnlyCell
+    cols = columns(spec)
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet(_sheet_title(spec))
+    for i, (h, _) in enumerate(cols):
+        ws.column_dimensions[_letter(i + 1)].width = max(10, min(36, len(str(h)) + 4))
+    ws.freeze_panes = "A2"
+    head = []
+    for h, _ in cols:
+        c = WriteOnlyCell(ws, value=h)
+        c.font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+        c.fill = HEAD_FILL
+        head.append(c)
+    ws.append(head)
+    m = spec.model
+    sel = select(*[getattr(m, a) for _, a in cols]).order_by(m.id) \
+        .execution_options(yield_per=5000)
+    for row in db.execute(sel):
+        ws.append([float(v) if isinstance(v, Decimal) else v for v in row])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _letter(n: int) -> str:
+    from openpyxl.utils import get_column_letter
+    return get_column_letter(n)
+
+
 def export(db: Session, specs, only=None) -> bytes:
+    if only and len(only) == 1:
+        one = next((s for s in specs if s.slug in only), None)
+        if one is not None and getattr(one, "bulk", False):
+            return _export_bulk(db, one)
     by_slug = {s.slug: s for s in specs}
     wb = Workbook()
     wb.remove(wb.active)

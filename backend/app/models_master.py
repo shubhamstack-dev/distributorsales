@@ -5,10 +5,10 @@ Two kinds of table live here, and the difference matters:
 * **Structure** — Zone > Headquarter > Territory, Product Group > Brand > SKU.
   A child names its parent with a foreign key, so each HQ sits in exactly one
   zone and each SKU in exactly one brand. These do not change year to year.
-* **Alignment** — which team covers which product groups and HQs, which
+* **Assignment** — which team covers which product groups and HQs, which
   customer and which employee cover which SKU in which territory, and which
-  reporting line a SKU rolls up to. These are realigned every year, so every
-  alignment row carries a YearId and last year's alignment stays readable.
+  reporting line a SKU rolls up to. These are reassigned every year, so every
+  assignment row carries a YearId and last year's assignment stays readable.
 
 Column names are explicit (PascalCase) to match schema.sql and the existing
 tables — except the four master tables taken over from MASTER DATA & TABLES.xlsx
@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (Date, Double, ForeignKey, Index, Integer, Numeric, String, Text,
+                        UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -269,6 +270,10 @@ class EmployeeMaster(Base):
     """EMPLOYEE_MASTER without its PASSWORD column: passwords are never stored
     here (the upload reads past it)."""
     __tablename__ = "EMPLOYEE_MASTER"
+
+    @property
+    def full_name(self) -> str:
+        return " ".join(x for x in (self.employee_ft_nm, self.employee_lt_nm) if x)
     id: Mapped[int] = mapped_column("EMPLOYEE_ID", Integer, primary_key=True, autoincrement=True)
     employee_ft_nm: Mapped[str] = mapped_column("EMPLOYEE_FT_NM", String(80), nullable=False)
     employee_lt_nm: Mapped[str | None] = mapped_column("EMPLOYEE_LT_NM", String(80))
@@ -318,7 +323,12 @@ class ProductMaster(Base):
     material_code: Mapped[str | None] = mapped_column("MATERIAL_CODE", String(50))
 
 
-# ============================================================ alignment
+# ======================================== assignment (by year) — no screen
+# The year-wise Customer / Employee assignment screens were removed in favour of
+# the old system's four *_ASSIGNMENT tables (below). These two tables, like
+# md_year, md_product_reporting(_sku) and md_team_product_group / _headquarter,
+# are kept with any rows already in them, so nothing entered is lost; nothing
+# reads or writes them now.
 class CustomerAssignment(Base):
     """One customer, one SKU, one year: which territory and team cover it.
 
@@ -352,3 +362,155 @@ class EmployeeAssignment(Base):
     __table_args__ = (UniqueConstraint("YearId", "EmployeeId", "TerritoryId", "SkuId",
                                        name="uq_ea_year_emp_terr_sku"),
                       Index("ix_ea_territory", "YearId", "TerritoryId"))
+
+
+# ============================== the data tables of the old system (Book1.xlsx)
+# MAPPING_MASTER (sales), MAPPING_MASTER_MID (mid-month sales), BUDGET_MASTER and
+# the four *_ASSIGNMENT tables, with the workbook's table and column names
+# exactly. Each column is (name, kind): "int", "num" (a DOUBLE, so 1.25415 comes
+# back as 1.25415), or a number = VARCHAR width. The attribute is the column
+# name in lower case (PRODUCT_ID -> product_id, Latitude -> latitude).
+#
+# Their *_ID columns hold the same numbers as the master tables: PRODUCT_ID and
+# PRODUCT_BRAND_ID are PRODUCT_MASTER / PRODUCT_MASTER_BRAND ids, CUSTOMER_ID and
+# EMPLOYEE_ID the CUSTOMER_MASTER / EMPLOYEE_MASTER ids, HQ_ID, TERRITORY_ID,
+# PRODUCT_GROUP_ID and TEAM_ID the Master IDs of HQs, territories, groups and
+# teams. No foreign keys: sales from years back name products and customers
+# that may not be in the masters, and they are kept as sent.
+MONTHS = ("JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
+          "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER")
+
+SALES_COLUMNS = [
+    ("ID", "int"), ("DIST_ID", "int"), ("PRODUCT_NAME", 250), ("PRODUCT_ID", "int"),
+    ("PRODUCT_GROUP_ID", "int"), ("RATE", "num"), ("HQ_ID", "int"), ("MONTH", 20), ("YEAR", "int"),
+    ("TERRITORY_ID", "int"), ("PRODUCT_BRAND_ID", "int"), ("DIST_NAME", 120), ("STATUS", 30),
+    ("SALES_QTY", "num"), ("OPENING_QTY", "num"), ("ISSUED_QTY", "num"), ("CLOSING_STOCK_QTY", "num"),
+    ("CLOSING_STOCK_VALUE", "num"), ("SALES_VALUE", "num"), ("CUSTOMER_NAME", 250),
+    ("CUSTOMER_MASTER_NAME", 250), ("PRODUCT_GROUP_NAME", 120), ("HQ_NAME", 120),
+    ("TERRITORY_NAME", 120), ("PRODUCT_BRAND_NAME", 120), ("INVOICE_NO", 60), ("Latitude", "num"),
+    ("Longitude", "num"), ("CUSTOMER_ID", "int"), ("FREE_QUANTITY", "num"), ("RETURN_QUANTITY", "num"),
+    ("PRODUCT_MASTER_NAME", 250), ("PRODUCT_BRAND_CATEGORY", 30),
+]
+MID_SALES_COLUMNS = SALES_COLUMNS + [("MID", 30)]
+
+BUDGET_COLUMNS = [
+    ("ID", "int"), ("S_NO", "int"), ("EMPLOYEE_ID", "int"), ("PRODUCT_GROUP", 120), ("PRODUCT_BRAND", 120),
+    ("HQ_NAME", 120), ("PRODUCT_ID", "int"), ("PRODUCT_NAME", 250), ("TARGET_YEAR", "int"),
+    *[(f"{m}_UNITS", "num") for m in MONTHS],
+    *[(m, "num") for m in MONTHS],
+    *[(f"{m}_ACTUAL", "num") for m in MONTHS],
+    ("PRODUCT_GROUP_ID", "int"), ("PRODUCT_BRAND_ID", "int"), ("HQ_ID", "int"),
+    ("PRODUCT_BRAND_CATEGORY", 30),
+    *[(f"{m}_{s}", "num") for s in ("EXPIRY_ACTUAL", "MID_ACTUAL", "EXPIRY_ADJUSTED", "RETURN",
+                                    "ACTUAL_UNITS", "MID_ACTUAL_UNITS") for m in MONTHS],
+]
+
+ASSIGNMENT_COLUMNS = {
+    "CUSTOMER_TERR_ASSIGNMENT": ["CUSTOMER_ID", "TERRITORY_ID", "HQ_ID", "PRODUCT_GROUP_ID", "TEAM_ID"],
+    "CUSTOMER_PG_ASSIGNMENT": ["CUSTOMER_ID", "PRODUCT_GROUP_ID", "PRODUCT_BRAND_ID", "PRODUCT_ID"],
+    "EMPLOYEE_TERR_ASSIGNMENT": ["EMPLOYEE_ID", "HQ_ID", "TERRITORY_ID"],
+    "EMPLOYEE_PG_ASSIGNMENT": ["EMPLOYEE_ID", "PRODUCT_ID", "PRODUCT_BRAND_ID", "PRODUCT_GROUP_ID"],
+}
+
+
+def attr_of(col: str) -> str:
+    return col.lower()
+
+
+def _sql_type(kind):
+    if kind == "int":
+        return Integer
+    if kind == "num":
+        return Double
+    return String(kind)
+
+
+def _table(classname: str, table: str, cols: list, args: tuple = (), pk="ID", doc="",
+           not_null: bool = False):
+    """A mapped class for one of the workbook's tables. Columns are created in
+    the workbook's order, which is the order an export writes them back in."""
+    ns = {"__tablename__": table, "__doc__": doc, "__table_args__": args}
+    for name, kind in cols:
+        if name == pk:
+            ns["id"] = mapped_column(name, Integer, primary_key=True, autoincrement=True)
+        else:
+            ns[attr_of(name)] = mapped_column(name, _sql_type(kind), nullable=not not_null)
+    return type(classname, (Base,), ns)
+
+
+SalesMapping = _table(
+    "SalesMapping", "MAPPING_MASTER", SALES_COLUMNS,
+    (Index("ix_mapping_year_month", "YEAR", "MONTH"), Index("ix_mapping_customer", "CUSTOMER_ID"),
+     Index("ix_mapping_product", "PRODUCT_ID"), Index("ix_mapping_hq", "HQ_ID")),
+    doc="Sales, one row per invoice line: MAPPING_MASTER of the old system.")
+
+MidSalesMapping = _table(
+    "MidSalesMapping", "MAPPING_MASTER_MID", MID_SALES_COLUMNS,
+    (Index("ix_mapping_mid_year_month", "YEAR", "MONTH"), Index("ix_mapping_mid_customer", "CUSTOMER_ID"),
+     Index("ix_mapping_mid_product", "PRODUCT_ID"), Index("ix_mapping_mid_hq", "HQ_ID")),
+    doc="Mid-month sales: MAPPING_MASTER_MID, the same columns plus MID.")
+
+# The workbook's S_NO repeats (one S_NO per budget line, shared by every HQ and
+# employee it is split across), so BUDGET_MASTER gets its own ID and a row is
+# known by S_NO + EMPLOYEE_ID + HQ_ID, which is unique in the data.
+Budget = _table(
+    "Budget", "BUDGET_MASTER", BUDGET_COLUMNS,
+    (UniqueConstraint("S_NO", "EMPLOYEE_ID", "HQ_ID", name="uq_budget_line"),
+     Index("ix_budget_year_emp", "TARGET_YEAR", "EMPLOYEE_ID")),
+    doc="Budget (targets) and actuals by month, per employee, HQ and product.")
+
+
+def _assignment(classname, table):
+    cols = ASSIGNMENT_COLUMNS[table]
+    return _table(classname, table, [("ID", "int")] + [(c, "int") for c in cols],
+                  (UniqueConstraint(*cols, name=f"uq_{table.lower()}"),), not_null=True,
+                  doc=f"{table}: the row is the assignment, so every column together is unique. "
+                      f"ID is this app's own, for editing one row.")
+
+
+CustomerTerrAssignment = _assignment("CustomerTerrAssignment", "CUSTOMER_TERR_ASSIGNMENT")
+CustomerPgAssignment = _assignment("CustomerPgAssignment", "CUSTOMER_PG_ASSIGNMENT")
+EmployeeTerrAssignment = _assignment("EmployeeTerrAssignment", "EMPLOYEE_TERR_ASSIGNMENT")
+EmployeePgAssignment = _assignment("EmployeePgAssignment", "EMPLOYEE_PG_ASSIGNMENT")
+
+
+# ================================= the old system's small masters (Book1.xlsx, 2nd)
+# They replace this app's own Years (md_year), Product reporting (+ › SKUs) and
+# Team › Product groups / Team › Headquarters. Those md_* tables are left in
+# the database untouched, rows and all; no screen reads them any more.
+class YearMaster(Base):
+    __tablename__ = "YEAR_MASTER"
+    id: Mapped[int] = mapped_column("YEAR_ID", Integer, primary_key=True, autoincrement=True)
+    year_number: Mapped[int] = mapped_column("YEAR_NUMBER", Integer, nullable=False, unique=True)
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+
+
+class BrandReporting(Base):
+    """The reporting lines a brand is reported under: N1, P1, P2, X-OTHERS.
+    PRODUCT_MASTER_BRAND.REPORTING holds the line's name."""
+    __tablename__ = "PRODUCT_MASTER_BRAND_REPORTING"
+    id: Mapped[int] = mapped_column("ID", Integer, primary_key=True, autoincrement=True)
+    reporting: Mapped[str] = mapped_column("REPORTING", String(30), nullable=False, unique=True)
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+
+
+class CustomerClassification(Base):
+    """CUSTOMER_MASTER.CUST_CLASSIFICATION_ID points at ID here."""
+    __tablename__ = "CUSTOMER_CLASSIFICATION"
+    id: Mapped[int] = mapped_column("ID", Integer, primary_key=True, autoincrement=True)
+    description: Mapped[str] = mapped_column("DESCRIPTION", String(100), nullable=False, unique=True)
+    active: Mapped[int] = mapped_column("STATUS", Integer, nullable=False, default=1)
+
+
+class TeamPgHqAssignment(Base):
+    """Which product group a team promotes in which HQ. TEAM_ID, PRODUCT_GROUP_ID
+    and HQ_ID are Master IDs; the *_NAME columns are filled from them."""
+    __tablename__ = "TEAM_PG_HQ_ASSIGNMENT"
+    __table_args__ = (UniqueConstraint("TEAM_ID", "PRODUCT_GROUP_ID", "HQ_ID", name="uq_team_pg_hq"),)
+    id: Mapped[int] = mapped_column("S_NO", Integer, primary_key=True, autoincrement=True)
+    team_id: Mapped[int] = mapped_column("TEAM_ID", Integer, nullable=False)
+    team_name: Mapped[str | None] = mapped_column("TEAM_NAME", String(120))
+    product_group_id: Mapped[int] = mapped_column("PRODUCT_GROUP_ID", Integer, nullable=False)
+    product_group_name: Mapped[str | None] = mapped_column("PRODUCT_GROUP_NAME", String(120))
+    hq_id: Mapped[int] = mapped_column("HQ_ID", Integer, nullable=False)
+    hq_name: Mapped[str | None] = mapped_column("HQ_NAME", String(120))
