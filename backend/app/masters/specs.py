@@ -38,6 +38,7 @@ class Field:
                               # "legacy_id" = the parent's Master ID, as the Excel tables use
     soft: bool = False        # ref: kept even when nothing has that id (yet)
     create_only: bool = False # set when the row is added, never changed after (the row's ID)
+    locked_help: str = ""     # what the edit form says under a create_only field
     count: int = 0            # aliases: how many alias columns there are
     cols: list[str] | None = None      # other headers this field is read from on upload
 
@@ -66,6 +67,8 @@ class Spec:
     filters: list[str] = field(default_factory=list)  # fields offered as filters above the list
     view: list = field(default_factory=list)          # list columns (view.Col); default: in_list
     name: Callable | None = None           # the row as a parent column shows it (view.name_of)
+    can_add: bool = True                   # False: rows come only from an upload (HEAD_COUNT)
+    can_delete: bool = True                # False: rows are edited, never removed on screen
 
     def f(self, name):
         return next(x for x in self.fields if x.name == name)
@@ -92,6 +95,11 @@ def v_team_pg_hq(db, o):
             row = db.execute(select(model).where(model.legacy_id == v)).scalars().first()
             if row is not None:
                 setattr(o, namef, row.name)
+
+
+def v_head_count(db, o):
+    if o.count is None or int(o.count) < 0:
+        bad("COUNT has to be 0 or more.")
 
 
 def v_country(db, o):
@@ -567,6 +575,19 @@ SPECS: list[Spec] = [
          sheets=["MAPPING_MASTER_MID", "MID_SALES", "MIDSALES", "MID_MONTH_SALES"],
          description="MAPPING_MASTER_MID: the mid-month sales, the same columns as Sales plus MID."),
 
+    Spec("head_count", "Head Count", "Budgeting", X.HeadCount, [
+        Field("division", "DIVISION", required=True, create_only=True,
+              locked_help="From the workbook; only COUNT is changed here."),
+        Field("hq", "HQ", required=True, create_only=True,
+              locked_help="From the workbook; only COUNT is changed here."),
+        Field("count", "COUNT", "int", required=True),
+    ], label=lambda o: f"{o.division} · {o.hq}", search=["division", "hq"],
+        order=["division", "hq"], validate=v_head_count, bulk=True, match=("division", "hq"),
+        can_add=False, can_delete=False,
+        sheets=["HEAD_COUNT", "HEADCOUNT"],
+        description="HEAD_COUNT: people per division in each HQ, with a TOTAL row per division. "
+                    "Rows come from the workbook (Upload Excel); here only COUNT is changed."),
+
     Spec("budget", "Budget", "Sales & budget", X.Budget,
          _table_fields(X.BUDGET_COLUMNS, BUDGET_LISTED, required=["S_NO", "EMPLOYEE_ID", "HQ_ID"]),
          label=lambda o: f"{o.s_no} — {o.product_name or ''} ({o.hq_name or ''}, {o.target_year})",
@@ -666,6 +687,8 @@ LAYOUT = {
                                      ("Product Brand", "product_brand_id"), ("Product", "product_id"))),
     # ----------------------------------------------------- Budgeting, Sales
     "budget": ("Budget", "Budgeting", []),
+    "head_count": ("Head Count", "Budgeting",
+                   _cols(("Division", "division", 1), ("HQ", "hq"), ("Count", "count"))),
     "sales": ("Sales", "Sales", []),
     "mid_sales": ("Mid sales", "Sales", []),
 }
@@ -694,7 +717,7 @@ def meta() -> list[dict]:
             "view": [{"label": c.label, "kind": V.kind(s, c.path), "primary": c.primary}
                      for c in s.view],
             "searchable": bool(s.search), "master_id": s.master_id,
-            "bulk": s.bulk, "filters": s.filters,
+            "bulk": s.bulk, "filters": s.filters, "can_add": s.can_add, "can_delete": s.can_delete,
             "table": s.model.__tablename__,
             "fields": [{k: v for k, v in vars(f).items()} for f in s.fields],
         })

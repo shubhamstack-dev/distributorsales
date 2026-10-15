@@ -247,7 +247,7 @@ Administration opens one panel of four columns:
 | Menu | Screens |
 |---|---|
 | Assignment | **Customer Terr-PG**, **Employee Terr-PG**, **Team PG HQ** (`TEAM_PG_HQ_ASSIGNMENT`) |
-| Budgeting | **Budget** (`BUDGET_MASTER`) |
+| Budgeting | **Budget** (`BUDGET_MASTER`), **Head Count** (`HEAD_COUNT`: DIVISION, HQ, COUNT; filled from the workbook, keyed on DIVISION + HQ, and on screen only COUNT is edited — no Add, no Delete, refused by the API too) |
 | Sales | **Sales** (`MAPPING_MASTER`), **Mid sales** (`MAPPING_MASTER_MID`) |
 
 **Customer Terr-PG and Employee Terr-PG** are one page each, as in the old

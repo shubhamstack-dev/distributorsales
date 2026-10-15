@@ -87,7 +87,7 @@ function Input({ f, form, set, spec, row }) {
     return (
       <label htmlFor={id}><span>{f.label}</span>
         <input id={id} value={v} readOnly className="num" />
-        <small className="fine">Set when the row was added; other tables point at it.</small></label>
+        <small className="fine">{f.locked_help || 'Set when the row was added; other tables point at it.'}</small></label>
     )
   }
   if (f.type === 'ref') {
@@ -170,6 +170,8 @@ export default function MasterPage({ spec }) {
   const [data, setData] = useState({ rows: [], total: 0 })
   const [sel, setSel] = useState(new Set())
   const [mode, setMode] = useState(null)          // null | 'add' | 'edit' | 'upload' | 'assign'
+  const canAdd = spec.can_add !== false            // HEAD_COUNT: rows come only from an upload
+  const canDelete = spec.can_delete !== false      // HEAD_COUNT: rows are edited, never removed
   const isTph = spec.slug === 'team_pg_hq'        // Team PG HQ has the old "Team Hq Pg" form too
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({})
@@ -318,7 +320,7 @@ export default function MasterPage({ spec }) {
                  onChange={(e) => { const l = [...e.target.files]; e.target.value = ''; setUpFiles(l); upload(true, l) }} />
           <button className="btn" onClick={() => api.masterExport(spec.slug).catch((e) => say(e.message, true))}>
             Download Excel</button>
-          <button className="btn primary" onClick={openAdd}>Add {singular(spec.title)}</button>
+          {canAdd && <button className="btn primary" onClick={openAdd}>Add {singular(spec.title)}</button>}
         </div>
       </div>
 
@@ -352,13 +354,13 @@ export default function MasterPage({ spec }) {
 
       <div className="listbar">
         <span className="muted">{data.total.toLocaleString('en-IN')} row{data.total === 1 ? '' : 's'}</span>
-        {sel.size > 0 && <button className="btn sm danger" onClick={removeMany} disabled={busy}>Delete {sel.size} selected</button>}
+        {canDelete && sel.size > 0 && <button className="btn sm danger" onClick={removeMany} disabled={busy}>Delete {sel.size} selected</button>}
       </div>
       <div className="scroll">
         <table className="grid-old">
           <thead><tr>
-            <th className="sel"><input type="checkbox" aria-label="Select all on this page" checked={allOn}
-              onChange={() => setSel(allOn ? new Set() : new Set(data.rows.map((r) => r.id)))} /></th>
+            {canDelete && <th className="sel"><input type="checkbox" aria-label="Select all on this page" checked={allOn}
+              onChange={() => setSel(allOn ? new Set() : new Set(data.rows.map((r) => r.id)))} /></th>}
             <th className="sno">S.No</th>
             {spec.view.map((c) => <th key={c.label} className={c.kind === 'num' ? 'r' : ''}>{c.label}</th>)}
             <th className="r">View More</th>
@@ -366,8 +368,8 @@ export default function MasterPage({ spec }) {
           <tbody>
             {data.rows.map((row, i) => (
               <tr key={row.id} className={row.active === 0 ? 'off' : ''}>
-                <td className="sel"><input type="checkbox" aria-label="Select row" checked={sel.has(row.id)}
-                  onChange={() => setSel((s) => { const n = new Set(s); n.has(row.id) ? n.delete(row.id) : n.add(row.id); return n })} /></td>
+                {canDelete && <td className="sel"><input type="checkbox" aria-label="Select row" checked={sel.has(row.id)}
+                  onChange={() => setSel((s) => { const n = new Set(s); n.has(row.id) ? n.delete(row.id) : n.add(row.id); return n })} /></td>}
                 <td className="sno">{(page - 1) * SIZE + i + 1}</td>
                 {spec.view.map((c, ci) => (
                   <td key={c.label} className={c.kind === 'num' ? 'r' : ''}><ViewCell c={c} v={row.__view?.[ci]} /></td>
@@ -376,17 +378,18 @@ export default function MasterPage({ spec }) {
                   <button className="icon-btn" title="View more / edit" aria-label="View more" onClick={() => openEdit(row)}>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></svg>
                   </button>
-                  <button className="icon-btn danger" title="Delete" aria-label="Delete" onClick={() => remove(row)}>
+                  {canDelete && <button className="icon-btn danger" title="Delete" aria-label="Delete" onClick={() => remove(row)}>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12h10l1-12M9 7V4h6v3" /></svg>
-                  </button>
+                  </button>}
                 </div></td>
               </tr>
             ))}
             {!data.rows.length && (
-              <tr><td colSpan={spec.view.length + 3} className="empty">
+              <tr><td colSpan={spec.view.length + (canDelete ? 3 : 2)} className="empty">
                 {q || Object.values(filters).some(Boolean)
                   ? 'Nothing matches. Clear the search or filters to see every row.'
-                  : <>Nothing here yet. <button className="linkish" onClick={openAdd}>Add the first one</button>.</>}
+                  : canAdd ? <>Nothing here yet. <button className="linkish" onClick={openAdd}>Add the first one</button>.</>
+                    : 'Nothing here yet. Upload the workbook to fill it.'}
               </td></tr>
             )}
           </tbody>

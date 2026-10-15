@@ -337,6 +337,8 @@ def list_rows(slug: str, request: Request, q: str | None = None, page: int = 1,
 @router.post("/masters/{slug}", status_code=201)
 def create(slug: str, body: dict = Body(...), db: Session = Depends(get_db)):
     spec = S.get(slug)
+    if not spec.can_add:
+        raise HTTPException(405, f"{spec.title} rows come from an upload; they are not added here.")
     obj = spec.model()
     obj.id = None
     _apply(db, spec, obj, body, creating=True)
@@ -376,6 +378,8 @@ def _delete_one(db: Session, spec: Spec, rid: int):
 @router.delete("/masters/{slug}/{rid}", status_code=204)
 def delete(slug: str, rid: int, db: Session = Depends(get_db)):
     spec = S.get(slug)
+    if not spec.can_delete:
+        raise HTTPException(405, f"{spec.title} rows are edited, not deleted.")
     _delete_one(db, spec, rid)
     db.commit()
 
@@ -384,6 +388,8 @@ def delete(slug: str, rid: int, db: Session = Depends(get_db)):
 def delete_many(slug: str, body: dict = Body(...), db: Session = Depends(get_db)):
     """All or nothing: if any row is still in use, none are removed."""
     spec = S.get(slug)
+    if not spec.can_delete:
+        raise HTTPException(405, f"{spec.title} rows are edited, not deleted.")
     ids = [int(i) for i in (body.get("ids") or [])][:5000]
     if not ids:
         bad("Choose at least one row.")

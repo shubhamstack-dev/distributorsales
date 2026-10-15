@@ -514,3 +514,15 @@ class TeamPgHqAssignment(Base):
     product_group_name: Mapped[str | None] = mapped_column("PRODUCT_GROUP_NAME", String(120))
     hq_id: Mapped[int] = mapped_column("HQ_ID", Integer, nullable=False)
     hq_name: Mapped[str | None] = mapped_column("HQ_NAME", String(120))
+
+
+class HeadCount(Base):
+    """HEAD_COUNT: how many people each division has in each HQ, with a TOTAL
+    row per division. Rows come from the workbook; on screen only COUNT is
+    edited. A row is DIVISION + HQ."""
+    __tablename__ = "HEAD_COUNT"
+    __table_args__ = (UniqueConstraint("DIVISION", "HQ", name="uq_head_count"),)
+    id: Mapped[int] = mapped_column("ID", Integer, primary_key=True, autoincrement=True)
+    division: Mapped[str] = mapped_column("DIVISION", String(60), nullable=False)
+    hq: Mapped[str] = mapped_column("HQ", String(60), nullable=False)
+    count: Mapped[int] = mapped_column("COUNT", Integer, nullable=False, default=0)
