@@ -11,7 +11,7 @@ export const MENUS = [
     links: [{ to: '/masters/terr-pg/customer', title: 'Customer Terr-PG' },
             { to: '/masters/terr-pg/employee', title: 'Employee Terr-PG' }] },
   { label: 'Budgeting', groups: ['Budgeting'] },
-  { label: 'Sales', groups: ['Sales'] },
+  { label: 'Sales', groups: ['Sales'], links: [{ to: '/masters/data-error', title: 'Data Error' }] },
 ]
 export const GROUPS = MENUS.flatMap((m) => m.groups)
 export const menuOf = (group) => MENUS.find((m) => m.groups.includes(group) || m.also?.includes(group))?.label

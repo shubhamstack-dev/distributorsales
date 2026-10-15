@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import MasterPage from './MasterPage.jsx'
 import MasterUpload from './MasterUpload.jsx'
 import TerrPgPage from './TerrPgPage.jsx'
+import DataError from './DataError.jsx'
 import { useMasterMeta } from './meta.js'
 
 /** Every master screen. They are chosen from the Masters menu in the top bar,
@@ -19,6 +20,7 @@ export default function Masters() {
       <Route index element={<Navigate to="upload" replace />} />
       <Route path="upload" element={<MasterUpload meta={meta} />} />
       <Route path="terr-pg/:kind" element={<TerrPgPage meta={meta} />} />
+      <Route path="data-error" element={<DataError />} />
       {meta.map((m) => (
         <Route key={m.slug} path={m.slug} element={<MasterPage key={m.slug} spec={m} />} />
       ))}

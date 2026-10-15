@@ -65,6 +65,66 @@ that was offered *and* whether it was used, and the Notes tab in the download
 repeats it. When a total looks wrong, the first question — did we convert the
 right files? — is answered inside the workbook.
 
+## Converting into MAPPING_MASTER
+
+**Names are checked first** (`services/name_check.py`). When Convert is pressed,
+the chosen files are read and every customer and product is looked up — the
+customer in CUSTOMER_MASTER by CUSTOMER_NAME or any CUSTOMER_ALIAS_1..50, the
+product in PRODUCT_MASTER by SAP_PRODUCT_NAME or any PRODUCT_ALIAS_1..100, with
+spaces, punctuation and case ignored. **Nothing is converted** when
+
+* a customer or product matches nothing — create it, or add the file's spelling
+  as an alias of the right one;
+* a product has no product group (on the SKU or its brand);
+* a customer has no territory for the product's group in
+  CUSTOMER_TERR_ASSIGNMENT (assign it on Customer Terr-PG): MAPPING_MASTER
+  needs the HQ, and the old data has no row without one;
+* the distributor has no DIST_ID (Distributor/Vendor).
+
+The screen lists each name with its rows and files, links to the master screen
+that puts it right, and can download the list. The upload stays, so **Convert
+again** works once the masters are right.
+
+**A customer with no territory is assigned right there.** Each such customer /
+product group starts on the territory CUSTOMER_MASTER gives the customer; Assign
+(or Assign all) adds the CUSTOMER_TERR_ASSIGNMENT row, with the team Team PG HQ
+lists for that group in that HQ, and the group's products. Then Convert again.
+
+**Data Error** (Sales menu, `GET /api/data-error`, as the old "Resolve" screen):
+for a distributor and File Type (Invoice: MAPPING_MASTER; Mid Month:
+MAPPING_MASTER_MID), its last conversion's rows in Temp (`sales_row`) against
+Main (the table, for its DIST_ID, month and year), Records Not Inserted,
+Duplicate Records (same invoice, customer, product, quantities and rate),
+rows Incomplete in Main (no product, customer or HQ), Month, Year, and the
+amount in the distributor's currency and in INR at Currency rates. The three
+distributors are set in Nepal (NPR) on start where no country is set.
+
+**Then the rows go in:**
+
+1. `sales_row` is emptied (`TRUNCATE`): it holds the last conversion only.
+   An older batch keeps its summary and files; its page says its rows were
+   replaced and points to Sales / Mid sales.
+2. This distributor's rows for the same month and year are removed from each
+   table about to be written, so converting a month again replaces it. A full
+   month (N) replaces that month's mid-month rows in MAPPING_MASTER and leaves
+   MAPPING_MASTER_MID as it is.
+3. Each row is inserted with the customer and product IDs it matched, and the
+   **AFTER INSERT triggers** on `sales_row` (`services/triggers.py`, made again
+   on every start; the same SQL is in `migrations/004_sales_row_triggers.sql`)
+   copy it into **MAPPING_MASTER** always, and into **MAPPING_MASTER_MID** as
+   well when Mid Month is Y (Mid Month N: MAPPING_MASTER only):
+   DIST_ID; the product, its brand and group (the SKU's own, else the brand's);
+   the customer's HQ and territory for that group from CUSTOMER_TERR_ASSIGNMENT
+   (the lowest ID where there are several); their names; CUSTOMER_NAME and
+   PRODUCT_NAME as in the file beside CUSTOMER_MASTER_NAME and
+   PRODUCT_MASTER_NAME; PRODUCT_BRAND_CATEGORY from the brand's REPORTING; and,
+   as in the old data, a return as a negative RETURN_QUANTITY with SALES_QTY 0.
+   SALES_VALUE is the row's amount.
+
+If the triggers cannot be made (the database user lacks the TRIGGER privilege,
+or binary logging is on for a user without SUPER), startup says so and Convert
+refuses rather than leave MAPPING_MASTER behind.
+
 ## Yetichem's three PW workbooks
 
 Yetichem sends a zip with **AHCPW.xls**, **AILGPW.xls** and **AILNPW.xls**,

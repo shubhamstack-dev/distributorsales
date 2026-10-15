@@ -391,3 +391,25 @@ td.row-actions>div{display:inline-flex;gap:6px}
 .multipick-list label.on{color:#fff;background:rgba(43,212,200,.10)}
 .multipick-list input{width:16px;height:16px;min-width:0;padding:0;margin:0;flex:none;accent-color:var(--cyan)}
 .alert.pre{white-space:pre-line}
+
+/* ----------------------------- Convert: a conversion the masters stopped */
+.blocked{border-color:rgba(255,107,107,.45);box-shadow:0 0 0 1px rgba(255,107,107,.12)}
+.blocked h2{color:var(--bad);margin:0 0 6px}
+.blocked-part{margin-top:18px}
+.blocked-part h3{display:flex;align-items:center;gap:10px;margin:0 0 4px}
+.blocked-part .count{font:600 .8rem var(--mono);padding:2px 9px;border-radius:999px;background:var(--bad-soft);color:var(--bad)}
+.blocked-part .scroll{max-height:280px;overflow-y:auto}
+.assign-rows td.pick{min-width:240px}
+.assign-rows td.pick small{display:block;margin-top:4px;white-space:normal}
+.assign-rows tr.done td{opacity:.75}
+.bad-text{color:var(--bad)}
+
+/* ------------------------------------------------------------ Data Error */
+.de-form{max-width:720px}
+.de-boxes{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin:18px 0 10px}
+.de-box{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--line-2);
+  border-radius:12px;background:rgba(2,6,13,.35)}
+.de-box span{font-size:.84rem;color:var(--ink-3)}
+.de-box b{font:600 1.25rem var(--mono);color:var(--ink)}
+.de-box.warn{border-color:rgba(255,107,107,.5)}
+.de-box.warn b{color:var(--bad)}

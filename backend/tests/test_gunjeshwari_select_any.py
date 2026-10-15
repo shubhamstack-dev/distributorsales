@@ -10,7 +10,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from tests.harness import client as c, ok, sign_in
+from tests.harness import client as c, ok, sign_in, commit_ok
 from app.services.parse import books_in, read_book
 
 
@@ -171,9 +171,9 @@ def test_a_hand_picked_file_without_batch_in_its_name_is_converted(tok):
                   files=[("files", ("g.zip", ZIPPED, "application/zip"))],
                   data={"distributor_id": str(g["id"])}))
     picked = ["Party Wise.pdf", "Register text.pdf", "readme.docx"]
-    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    b = commit_ok(r['token'], H(tok), {
         "distributor_id": g["id"], "as_of": "2026-10-05", "files": picked,
-        "source": r["source"]}))
+        "source": r["source"]})
     assert b["rows"] == 6
     assert (b["month"], b["year"], b["mid_month"]) == ("September", 2026, "N")
     got = ok(c.get(f"/api/batches/{b['batch_id']}", headers=H(tok)))

@@ -5,7 +5,7 @@ import zipfile
 
 import pytest
 
-from tests.harness import client as c, Testing, ok, sign_in
+from tests.harness import client as c, Testing, ok, sign_in, commit_ok
 from app import models as M
 from app.services import seed
 from app.services.parse import read_book
@@ -84,8 +84,8 @@ def commit(tok, yeti, as_of):
                   data={"distributor_id": str(yeti["id"])}))
     picked = sorted(f["name"] for f in r["files"] if f["suggested"])
     assert picked == ["AHCPW.xls", "AILGPW.xls", "AILNPW.xls"]      # not the stocks file
-    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
-        "distributor_id": yeti["id"], "as_of": as_of, "files": picked, "source": r["source"]}))
+    b = commit_ok(r['token'], H(tok), {
+        "distributor_id": yeti["id"], "as_of": as_of, "files": picked, "source": r["source"]})
     rows = ok(c.get(f"/api/batches/{b['batch_id']}/rows?size=50", headers=H(tok)))["rows"]
     return b, rows
 

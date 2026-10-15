@@ -9,12 +9,12 @@ from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
-from .. import config, models as M
+from .. import config, models as M, models_master as X
 from ..database import get_db
-from ..services import excel, names as namesvc, parse
+from ..services import excel, name_check, names as namesvc, parse, triggers
 from ..services.auth import issue_token, password_ok
 from ..services.rules import period
 from ..services.seed import SELECT_ANY
@@ -292,6 +292,57 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     p = period(as_of, cutoff, mid_cutoff)
     map_customer, map_product = _mapper(db, d.id, "customer"), _mapper(db, d.id, "product")
 
+    # 1. Read every chosen file. Nothing is written until all of it is checked.
+    files, read = [], []
+    unread = []
+    for name in on_disk:
+        used = name in chosen
+        with open(os.path.join(folder, name), "rb") as fh:
+            data = fh.read()
+        r = parse.read_book(name, data, negate, any_file=any_file, **_read_opts(d)) if used else None
+        if r and not r["rows"]:
+            unread.append(name)
+        files.append((name, used, r))
+        if used:
+            for x in r["rows"]:
+                read.append({**x, "file": name,
+                             "customer_as": map_customer(x["customer"]),
+                             "product_as": map_product(x["product"])})
+    if not read:
+        raise HTTPException(409, "Nothing could be read from the files you chose"
+                            + (f" ({', '.join(unread)})" if unread else "") + ".")
+
+    # 2. Every customer and product has to be in the masters (name or alias), and
+    #    every customer assigned a territory for the product's group. If not,
+    #    nothing goes in; the upload stays, to be converted again once the
+    #    masters are put right.
+    problems = name_check.check(db, read, d)
+    if name_check.blocking(problems):
+        db.rollback()
+        raise HTTPException(409, {"message": name_check.message(problems, d.name), **problems})
+    if not triggers.READY["ok"]:
+        raise HTTPException(500, "The sales_row triggers to MAPPING_MASTER are missing, so nothing "
+                                 f"was converted: {triggers.READY['error']}")
+
+    # 3. sales_row holds the last conversion only: emptied before the rows go in.
+    #    (TRUNCATE commits on MySQL; nothing of this conversion is written yet.)
+    db.rollback()
+    if db.get_bind().dialect.name == "mysql":
+        db.execute(text("TRUNCATE TABLE sales_row"))
+    else:
+        db.execute(text("DELETE FROM sales_row"))
+    db.commit()
+
+    # 4. The triggers copy each row into MAPPING_MASTER, and a Mid Month Y row
+    #    into MAPPING_MASTER_MID as well. This distributor's rows for the same
+    #    month go first from each table written, so converting a month again
+    #    replaces it rather than adding it twice (a full month, N, replaces the
+    #    mid-month rows in MAPPING_MASTER and leaves MAPPING_MASTER_MID as it is).
+    targets = [X.SalesMapping] + ([X.MidSalesMapping] if p["mid_month"] == "Y" else [])
+    replaced = {t.__tablename__: db.execute(delete(t).where(
+        t.dist_id == d.dist_id, t.month == p["month"], t.year == p["year"])).rowcount
+        for t in targets}
+
     batch = M.Batch(distributor_id=d.id, source_name=(body.get("source") or "")[:255],
                     as_of=as_of, month_name=p["month"], year=p["year"],
                     mid_month=p["mid_month"], cutoff_day=cutoff,
@@ -302,55 +353,43 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
                            "the rule says." if p["wrapped"] else None))
     db.add(batch)
     db.flush()
-
-    seq, omitted, tot_q, tot_a = 0, 0, 0.0, 0.0
-    unread = []
-    for name in on_disk:
-        used = name in chosen
-        path = os.path.join(folder, name)
-        with open(path, "rb") as fh:
-            data = fh.read()
-        r = parse.read_book(name, data, negate, any_file=any_file, **_read_opts(d)) \
-            if used else None
-        if r and not r["rows"]:
-            unread.append(name)
-        bf = M.BatchFile(batch_id=batch.id, file_name=name, used=1 if used else 0,
-                         layout=(", ".join(s["layout"] for s in r["sheets"] if s["layout"])
-                                 if r else None),
-                         rows=len(r["rows"]) if r else 0, omitted=r["omitted"] if r else 0,
-                         detail=(r["error"] if r else "not chosen"))
-        db.add(bf)
-        if not used:
-            continue
-        omitted += r["omitted"]
-        for x in r["rows"]:
-            seq += 1
-            inv = x["invoice"] if (invoice_mode == "file" and x["invoice"]) else f"INV - {seq}"
-            if rate_mode == "file" and x.get("rate") is not None:
-                rate = x["rate"]
-            else:
-                rate = 0.0 if x["qty"] == 0 else x["amount"] / x["qty"]
-            tot_q += x["qty"]
-            tot_a += x["amount"]
-            db.add(M.SalesRow(
-                batch_id=batch.id, seq=seq, distributor_name=d.name, invoice_no=inv[:40],
-                month_name=p["month"], year=p["year"], mid_month=p["mid_month"],
-                customer_name=map_customer(x["customer"])[:200],
-                product_name=map_product(x["product"])[:200],
-                quantity=x["qty"], free_quantity=x["free"], rate=rate,
-                b_amount=x.get("b_amount", x["amount"]), amount=x["amount"], source_file=name,
-                is_return=1 if x["is_return"] else 0))
-    if seq == 0:
-        db.rollback()
-        raise HTTPException(409, "Nothing could be read from the files you chose"
-                            + (f" ({', '.join(unread)})" if unread else "") + ".")
+    for name, used, r in files:
+        db.add(M.BatchFile(batch_id=batch.id, file_name=name, used=1 if used else 0,
+                           layout=(", ".join(s["layout"] for s in r["sheets"] if s["layout"])
+                                   if r else None),
+                           rows=len(r["rows"]) if r else 0, omitted=r["omitted"] if r else 0,
+                           detail=(r["error"] if r else "not chosen")))
+    omitted = sum(r["omitted"] for _, used, r in files if used)
+    seq, tot_q, tot_a = 0, 0.0, 0.0
+    for x in read:
+        seq += 1
+        inv = x["invoice"] if (invoice_mode == "file" and x["invoice"]) else f"INV - {seq}"
+        if rate_mode == "file" and x.get("rate") is not None:
+            rate = x["rate"]
+        else:
+            rate = 0.0 if x["qty"] == 0 else x["amount"] / x["qty"]
+        tot_q += x["qty"]
+        tot_a += x["amount"]
+        db.add(M.SalesRow(
+            batch_id=batch.id, seq=seq, distributor_name=d.name, invoice_no=inv[:40],
+            month_name=p["month"], year=p["year"], mid_month=p["mid_month"],
+            customer_name=x["customer_as"][:200], product_name=x["product_as"][:200],
+            quantity=x["qty"], free_quantity=x["free"], rate=rate,
+            b_amount=x.get("b_amount", x["amount"]), amount=x["amount"], source_file=x["file"],
+            is_return=1 if x["is_return"] else 0,
+            customer_id=x["customer_id"], product_id=x["product_id"]))
     mapped = [m for m in (map_customer.summary("customer"), map_product.summary("product")) if m]
     if unread:
         mapped.append("Chosen but no sales rows found in: " + ", ".join(unread) + ".")
     if rate_mode == "file":
         mapped.append("Rate read from the file where it has a rate column.")
-    if mapped:
-        batch.notes = " ".join(([batch.notes] if batch.notes else []) + mapped)
+    mapped.append(f"{seq} rows into " + " and ".join(
+        f"{t}" + (f" (replacing {n} earlier rows of {d.name} for {p['month']} {p['year']})" if n else "")
+        for t, n in replaced.items()) + ".")
+    if problems["matched_twice"]:
+        mapped.append("Names two masters both carry (the lower ID was used): "
+                      + ", ".join(problems["matched_twice"][:10]) + ".")
+    batch.notes = " ".join(([batch.notes] if batch.notes else []) + mapped)
     batch.row_count, batch.omitted_count = seq, omitted
     batch.total_qty, batch.total_amount = tot_q, round(tot_a, 2)
     db.commit()
@@ -358,7 +397,8 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     return {"batch_id": batch.id, "rows": seq, "omitted": omitted,
             "total_qty": tot_q, "total_amount": round(tot_a, 2),
             "month": p["month"], "year": p["year"], "mid_month": p["mid_month"],
-            "wrapped": p["wrapped"],
+            "wrapped": p["wrapped"], "mapping_tables": list(replaced),
+            "mapping_replaced": replaced, "matched_twice": problems["matched_twice"],
             "unmatched_customers": sorted(map_customer.missed),
             "unmatched_products": sorted(map_product.missed)}
 
@@ -382,12 +422,20 @@ def batches(distributor_id: int | None = None, limit: int = 50, db: Session = De
     return [_batch_out(b) for b in db.execute(q).scalars()]
 
 
+def _replaced(db: Session, b: M.Batch) -> bool:
+    """sales_row keeps the last conversion only (it is emptied before each one),
+    so an older batch has no rows left there. Its data is in MAPPING_MASTER(_MID)."""
+    return b.row_count > 0 and not db.execute(
+        select(M.SalesRow.id).where(M.SalesRow.batch_id == b.id).limit(1)).first()
+
+
 @router.get("/batches/{bid}")
 def batch(bid: int, db: Session = Depends(get_db)):
     b = db.get(M.Batch, bid)
     if not b:
         raise HTTPException(404, "No such batch")
     out = _batch_out(b)
+    out["rows_replaced"] = _replaced(db, b)
     out["files"] = [{"name": f.file_name, "used": bool(f.used), "layout": f.layout,
                      "rows": f.rows, "omitted": f.omitted, "detail": f.detail}
                     for f in sorted(b.files, key=lambda f: (not f.used, f.file_name))]
@@ -422,6 +470,10 @@ def export(bid: int, db: Session = Depends(get_db)):
     b = db.get(M.Batch, bid)
     if not b:
         raise HTTPException(404, "No such batch")
+    if _replaced(db, b):
+        table = "MAPPING_MASTER and MAPPING_MASTER_MID" if b.mid_month == "Y" else "MAPPING_MASTER"
+        raise HTTPException(410, "This batch's rows were replaced by a later conversion (sales_row "
+                                 f"keeps the last one only). Its sales are in {table}: Sales menu.")
     rows = db.execute(select(M.SalesRow).where(M.SalesRow.batch_id == bid)
                       .order_by(M.SalesRow.seq)).scalars().all()
     data = excel.build(b, rows, b.files)

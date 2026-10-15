@@ -8,7 +8,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from tests.harness import client as c, Testing, ok, sign_in
+from tests.harness import client as c, Testing, ok, sign_in, commit_ok
 from app import models as M
 from app.services import seed
 from app.services.parse import books_in, read_book
@@ -147,9 +147,9 @@ def test_a_batch_pdf_not_named_ali_or_ahl_is_not_ticked_but_can_be_chosen(tok):
     assert by["Sales Batch Wise Report.pdf"]["rows"] == 60
     assert by["Cover note.pdf"]["error"]
 
-    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    b = commit_ok(r['token'], H(tok), {
         "distributor_id": d["id"], "as_of": "2026-10-05",
-        "files": ["Sales Batch Wise Report.pdf"], "source": r["source"]}))
+        "files": ["Sales Batch Wise Report.pdf"], "source": r["source"]})
     assert b["rows"] == 60 and b["total_qty"] == 600 and b["total_amount"] == 75030.00
     assert (b["month"], b["mid_month"]) == ("September", "N")       # 5th, cut-off 10th
 

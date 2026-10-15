@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from . import config, models as M, models_master  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
-from .routers import api, assign_ops, master_upload, masters, terr_pg
-from .services import migrate, seed
+from .routers import api, assign_ops, data_error, master_upload, masters, terr_pg
+from .services import migrate, seed, triggers
 from .services.auth import read_token
 
 app = FastAPI(title="Distributor sales", version="1.0")
@@ -46,6 +46,7 @@ app.include_router(master_upload.router)      # before masters: /masters/upload 
 app.include_router(masters.router)
 app.include_router(terr_pg.router)            # Customer / Employee Terr-PG pages
 app.include_router(assign_ops.router)         # their create / delete / assign all / clean
+app.include_router(data_error.router)         # Data Error: temp vs main after a conversion
 
 Base.metadata.create_all(engine)
 try:
@@ -64,7 +65,15 @@ try:
         seed.ensure_masters(_db)
         for done in seed.ensure_master_ids(_db):
             print(f"[startup] {done}", flush=True)
+        for done in seed.ensure_dist_ids(_db):
+            print(f"[startup] {done}", flush=True)
     finally:
         _db.close()
 except Exception as e:                       # never stop the API booting over seeding
     print(f"[startup] could not seed distributors: {e}", flush=True)
+
+# sales_row -> MAPPING_MASTER / MAPPING_MASTER_MID, on every insert
+if triggers.ensure(engine):
+    print("[startup] sales_row triggers to MAPPING_MASTER / MAPPING_MASTER_MID in place", flush=True)
+else:
+    print(f"[startup] could not make the sales_row triggers: {triggers.READY['error']}", flush=True)

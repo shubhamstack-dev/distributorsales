@@ -12,7 +12,7 @@ export const getToken = () => token
 export const onSignedOut = (fn) => { onOut = fn }
 
 export class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status }
+  constructor(status, message, detail) { super(message); this.status = status; this.detail = detail }
 }
 
 async function handle(res) {
@@ -23,9 +23,10 @@ async function handle(res) {
   try { data = text ? JSON.parse(text) : null } catch { data = null }
   if (!res.ok) {
     const d = data?.detail
+    // detail may be an object with a message and the lists behind it (a refused conversion)
     throw new ApiError(res.status, typeof d === 'string' ? d
       : Array.isArray(d) ? d.map((x) => x.msg || JSON.stringify(x)).join('; ')
-      : data?.message || res.statusText)
+      : d?.message || data?.message || res.statusText, d && typeof d === 'object' && !Array.isArray(d) ? d : null)
   }
   return data
 }
@@ -115,6 +116,8 @@ export const api = {
   // Customer / Employee Terr-PG: the two assignment tables of a kind, joined
   // create / delete / assign all / clean on the assignment pages; dry_run only counts
   assign: (kind, action, body) => call('POST', `/api/assign/${kind}/${action}`, body),
+  dataError: (distributorId, fileType) =>
+    call('GET', `/api/data-error?${qs({ distributor_id: distributorId, file_type: fileType })}`),
   terrPg: (kind, params) => call('GET', `/api/terr-pg/${kind}?${qs(params)}`),
   terrPgExport: (kind, params) => save(`/api/terr-pg/${kind}/export?${qs(params)}`, `${kind}-terr-pg.xlsx`),
   rate: (frm, to, on) => call('GET', `/api/currency/rate?${qs({ frm, to, on })}`),

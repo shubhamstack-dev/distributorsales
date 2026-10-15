@@ -9,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from tests.harness import client as c, Testing, ok, sign_in
+from tests.harness import client as c, Testing, ok, sign_in, commit_ok
 from app import models as M
 from app.services import names, seed
 from app.services.excel import HEADS
@@ -134,9 +134,9 @@ def batch(tok, gunj):
                   data={"distributor_id": str(gunj["id"])}))
     picked = sorted(f["name"] for f in r["files"] if f["suggested"])
     assert picked == ["AHL BATCHWISE.PDF", "ALI BATCHWISE.pdf"]
-    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    b = commit_ok(r['token'], H(tok), {
         "distributor_id": gunj["id"], "as_of": "2026-10-05", "files": picked,
-        "source": r["source"]}))
+        "source": r["source"]})
     rows = ok(c.get(f"/api/batches/{b['batch_id']}/rows?size=50", headers=H(tok)))["rows"]
     return b, rows
 
@@ -200,9 +200,9 @@ def test_after_the_tenth_it_is_the_current_month_and_y(tok, gunj):
     r = ok(c.post("/api/uploads/inspect", headers=H(tok),
                   files=[("files", ("g.zip", _zip(), "application/zip"))],
                   data={"distributor_id": str(gunj["id"])}))
-    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    b = commit_ok(r['token'], H(tok), {
         "distributor_id": gunj["id"], "as_of": "2026-10-11",
-        "files": ["ALI BATCHWISE.pdf", "AHL BATCHWISE.PDF"]}))
+        "files": ["ALI BATCHWISE.pdf", "AHL BATCHWISE.PDF"]})
     assert (b["month"], b["year"], b["mid_month"]) == ("October", 2026, "Y")
 
 
@@ -242,9 +242,9 @@ def test_two_zips_uploaded_together_are_combined(tok, gunj):
     picked = sorted(f["name"] for f in r["files"] if f["suggested"])
     assert picked == ["AHL BATCHWISE 07-10.pdf", "ALI BATCHWISE.pdf"]
     assert r["source"] == "ALI.zip, AHL.zip"
-    b = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    b = commit_ok(r['token'], H(tok), {
         "distributor_id": gunj["id"], "as_of": "2026-10-20", "files": picked,
-        "source": r["source"]}))
+        "source": r["source"]})
     assert b["rows"] == 5 and b["total_qty"] == 42 and b["total_amount"] == 643.00
     assert (b["month"], b["year"], b["mid_month"]) == ("October", 2026, "Y")
     rows = ok(c.get(f"/api/batches/{b['batch_id']}/rows?size=50", headers=H(tok)))["rows"]

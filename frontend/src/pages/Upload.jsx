@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
+import RefSelect from './masters/RefSelect.jsx'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
   'September', 'October', 'November', 'December']
@@ -37,6 +38,7 @@ export default function Upload() {
   const [busy, setBusy] = useState(false)
   const [over, setOver] = useState(false)
   const [err, setErr] = useState('')
+  const [blocked, setBlocked] = useState(null)   // a refused conversion's lists
   const pick = useRef(null)
   const [lists, setLists] = useState(null)
   const [listMsg, setListMsg] = useState(null)
@@ -53,6 +55,7 @@ export default function Upload() {
   const anyFile = !!dist?.select_any
   const canPick = (f) => anyFile || (f.selectable ?? !f.error)
   function chooseDist(id) {
+    setBlocked(null)
     setDistId(id)
     const d = dists.find((x) => String(x.id) === String(id))
     if (d) { setCutoff(d.cutoff_day); setMidCutoff(d.mid_cutoff_day || d.cutoff_day) }
@@ -78,12 +81,13 @@ export default function Upload() {
     try {
       const r = await api.inspect(files, Number(distId), setProgress)
       setFound(r)
+      setBlocked(null)
       setSel(new Set(r.files.filter((f) => f.suggested).map((f) => f.name)))
     } catch (e) { setErr(e.message) } finally { setBusy(false); setProgress(null) }
   }
 
   async function convert() {
-    setErr(''); setBusy(true)
+    setErr(''); setBlocked(null); setBusy(true)
     try {
       const r = await api.commit(found.token, {
         distributor_id: Number(distId), as_of: asOf, cutoff_day: Number(cutoff),
@@ -91,7 +95,12 @@ export default function Upload() {
         who: sessionStorage.getItem('ds.who') || 'user',
       })
       nav(`/batches/${r.batch_id}`)
-    } catch (e) { setErr(e.message); setBusy(false) }
+    } catch (e) {
+      // names not in the masters: nothing converted, the list of what to put right
+      if (e.status === 409 && e.detail?.new_customers) { setBlocked(e.detail); setErr('') }
+      else setErr(e.message)
+      setBusy(false)
+    }
   }
 
   const p = period(asOf, Number(cutoff) || 15, Number(midCutoff) || Number(cutoff) || 15)
@@ -108,6 +117,7 @@ export default function Upload() {
       <p className="lead">Drop the zip a distributor sends, choose the files that belong to this run,
         and the rows are kept as a batch and given back as the standard twelve-column sheet.</p>
       {err && <div className="alert bad">{err}</div>}
+      {blocked && <Blocked p={blocked} busy={busy} onRetry={convert} onClose={() => setBlocked(null)} />}
 
       <section className="panel">
         <div className="panel-head"><span className="step">1</span>
@@ -251,3 +261,136 @@ export default function Upload() {
     </div>
   )
 }
+
+
+/** A conversion the masters stopped. Nothing went in; this says what to put
+ *  right and where, then Convert again uses the same upload. */
+function Blocked({ p, busy, onRetry, onClose }) {
+  const parts = [
+    { key: 'new_customers', title: 'Customers not in Customer/Hospital',
+      what: 'Create the customer, or add this spelling as an alias of the right one.',
+      to: '/masters/customer', link: 'Customer/Hospital',
+      cols: ['Name in the file', 'Rows', 'Files'], row: (e) => [e.name, e.rows, e.files.join(', ')] },
+    { key: 'new_products', title: 'Products not in SKU',
+      what: 'Create the SKU, or add this spelling as an alias of the right one.',
+      to: '/masters/sku', link: 'SKU',
+      cols: ['Name in the file', 'Rows', 'Files'], row: (e) => [e.name, e.rows, e.files.join(', ')] },
+    { key: 'products_without_group', title: 'Products with no product group',
+      what: 'Give the SKU, or its brand, a product group.',
+      to: '/masters/sku', link: 'SKU',
+      cols: ['Product', 'Rows'], row: (e) => [e.name, e.rows] },
+    { key: 'customers_not_assigned', title: 'Customers with no territory for the product group',
+      what: 'Assign the customer a territory for that group, so the sales have an HQ.',
+      to: '/masters/terr-pg/customer', link: 'Customer Terr-PG',
+      cols: ['Customer', 'Product group', 'Rows'], row: (e) => [e.customer, e.product_group, e.rows] },
+  ].filter((x) => p[x.key]?.length)
+
+  function download() {
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const lines = [['What', 'Name', 'Product group', 'Rows', 'Files'].map(q).join(',')]
+    for (const x of parts) {
+      for (const e of p[x.key]) {
+        lines.push([x.title, e.name || e.customer, e.product_group || '', e.rows, (e.files || []).join(' ')].map(q).join(','))
+      }
+    }
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/csv' }))
+    a.download = 'not-in-the-masters.csv'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  return (
+    <section className="panel blocked" role="alert">
+      <h2>Nothing was converted</h2>
+      <p className="lead">Every customer and product has to be in the masters, by its name or an
+        alias, before the rows go in. Put these right, then convert again: the files stay uploaded.</p>
+      {p.dist_id_missing && (
+        <div className="alert bad">This distributor has no DIST_ID, which MAPPING_MASTER needs.{' '}
+          <Link to="/masters/distributor">Set it on Distributor/Vendor</Link>.</div>
+      )}
+      {parts.map((x) => (
+        <div key={x.key} className="blocked-part">
+          <h3>{x.title} <span className="count">{p[x.key].length}</span></h3>
+          <p className="fine">{x.what} <Link to={x.to}>Open {x.link}</Link></p>
+          {x.key === 'customers_not_assigned' ? <AssignRows list={p[x.key]} /> : <>
+          <div className="scroll"><table className="grid-old">
+            <thead><tr>{x.cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+            <tbody>{p[x.key].slice(0, 200).map((e, i) => (
+              <tr key={i}>{x.row(e).map((v, j) => <td key={j}>{j === 0 ? <span className="primary-name">{v}</span> : v}</td>)}</tr>
+            ))}</tbody>
+          </table></div>
+          {p[x.key].length > 200 && <p className="fine">and {p[x.key].length - 200} more: download the list.</p>}
+          </>}
+        </div>
+      ))}
+      <div className="actions">
+        <button className="btn primary" disabled={busy} onClick={onRetry}>{busy ? 'Checking…' : 'Convert again'}</button>
+        <button className="btn" onClick={download}>Download the list</button>
+        <button className="btn" onClick={onClose}>Close</button>
+      </div>
+    </section>
+  )
+}
+
+
+/** The customers a conversion found with no territory for a product group,
+ *  assigned here without leaving Convert: each row starts on the territory the
+ *  customer master gives it; the team is the one Team PG HQ lists for the group
+ *  in that territory's HQ, and every active product of the group goes with it. */
+function AssignRows({ list }) {
+  const [terr, setTerr] = useState(() => Object.fromEntries(list.map((e, i) => [i, e.territory_id ?? null])))
+  const [state, setState] = useState({})           // i -> {ok, t}
+  const [busy, setBusy] = useState(false)
+
+  async function assign(i) {
+    const e = list[i]
+    if (!terr[i]) { setState((s) => ({ ...s, [i]: { ok: false, t: 'Choose a territory.' } })); return false }
+    try {
+      const r = await api.assign('customer', 'create', {
+        customer_ids: [e.customer_id], territory_ids: [terr[i]], product_group_ids: [e.product_group_id] })
+      const ok = r.territory_rows_added > 0
+      setState((s) => ({ ...s, [i]: ok
+        ? { ok: true, t: `Assigned, with ${r.product_rows_added} product${r.product_rows_added === 1 ? '' : 's'}.` }
+        : { ok: false, t: r.notes?.[0] || 'Already assigned.' } }))
+      return ok
+    } catch (err) { setState((s) => ({ ...s, [i]: { ok: false, t: err.message } })); return false }
+  }
+  async function assignAll() {
+    setBusy(true)
+    for (let i = 0; i < list.length; i++) if (!state[i]?.ok) await assign(i)   // one by one: each says how it went
+    setBusy(false)
+  }
+  const done = list.filter((_, i) => state[i]?.ok).length
+
+  return (
+    <>
+      <div className="scroll"><table className="grid-old assign-rows">
+        <thead><tr><th>Customer</th><th>Product group</th><th>Rows</th><th>Territory</th><th /></tr></thead>
+        <tbody>{list.slice(0, 200).map((e, i) => (
+          <tr key={i} className={state[i]?.ok ? 'done' : ''}>
+            <td><span className="primary-name">{e.customer}</span></td>
+            <td>{e.product_group}</td>
+            <td>{e.rows}</td>
+            <td className="pick">
+              {state[i]?.ok ? <span className="chip ok">Assigned</span>
+                : <RefSelect slug="territory" keyBy="legacy_id" blank="Choose…" value={terr[i]}
+                             onChange={(v) => setTerr((t) => ({ ...t, [i]: v }))} />}
+              {state[i] && !state[i].ok && <small className="bad-text">{state[i].t}</small>}
+              {state[i]?.ok && <small className="fine">{state[i].t}</small>}
+            </td>
+            <td>{!state[i]?.ok && (
+              <button className="btn sm" disabled={busy} onClick={async () => { setBusy(true); await assign(i); setBusy(false) }}>
+                Assign</button>)}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      <div className="actions">
+        <button className="btn" disabled={busy || done === list.length} onClick={assignAll}>
+          {busy ? 'Assigning…' : `Assign all ${list.length - done} to the territory chosen`}</button>
+        {done > 0 && <span className="fine">{done} assigned. Convert again when the rest are done.</span>}
+      </div>
+    </>
+  )
+}
+

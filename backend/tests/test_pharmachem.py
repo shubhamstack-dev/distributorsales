@@ -19,7 +19,7 @@ import zipfile
 import openpyxl
 import pytest
 
-from tests.harness import client as c, ok, sign_in
+from tests.harness import client as c, ok, sign_in, commit_ok
 from app.services import parse
 from app.services.rules import period
 from datetime import date
@@ -152,9 +152,9 @@ def batch(h, pharmachem):
                   files=[("files", ("Pharmachem.zip", the_zip(), "application/zip"))]))
     ticked = sorted(f["name"] for f in r["files"] if f["suggested"])
     assert ticked == ["PHARMA1.xlsx", "PHARMA2.xlsx", "PHARMA3.xlsx", "PHARMA4.xlsx"]
-    done = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=h, json={
+    done = commit_ok(r['token'], h, {
         "distributor_id": pharmachem["id"], "as_of": "2026-10-09", "files": ticked,
-        "source": r["source"]}))
+        "source": r["source"]})
     rows = ok(c.get(f"/api/batches/{done['batch_id']}/rows?size=500", headers=h))["rows"]
     return done, rows
 
@@ -203,7 +203,7 @@ def test_the_download_has_the_twelve_columns(h, batch):
 def test_the_11th_is_this_month_but_still_not_mid_month(h, pharmachem):
     r = ok(c.post("/api/uploads/inspect", headers=h, data={"distributor_id": pharmachem["id"]},
                   files=[("files", ("p.zip", the_zip(), "application/zip"))]))
-    done = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=h, json={
+    done = commit_ok(r['token'], h, {
         "distributor_id": pharmachem["id"], "as_of": "2026-10-11",
-        "files": [f["name"] for f in r["files"] if f["suggested"]]}))
+        "files": [f["name"] for f in r["files"] if f["suggested"]]})
     assert (done["month"], done["mid_month"]) == ("October", "N")

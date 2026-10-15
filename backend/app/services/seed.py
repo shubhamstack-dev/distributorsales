@@ -172,6 +172,29 @@ def ensure_master_ids(db: Session) -> list[str]:
     return done
 
 
+# DIST_ID in MAPPING_MASTER: each distributor's number in the old system.
+DIST_IDS = {"PHARMACHEM": 18671704, "YETICHEM": 16212104, "GUNJESHWARI": 12664157}
+
+
+def ensure_dist_ids(db: Session) -> list[str]:
+    """Fill a distributor's DIST_ID, and its country, where empty; one set by hand is kept."""
+    done = []
+    for d in db.execute(select(M.Distributor).where(M.Distributor.dist_id.is_(None))).scalars():
+        v = DIST_IDS.get((d.name or "").strip().upper())
+        if v:
+            d.dist_id = v
+            done.append(f"{d.name} given DIST_ID {v}")
+    # the three send Nepal's sales, in NPR: Data Error shows their amounts in INR from it
+    nepal = db.execute(select(X.Country).where(X.Country.code == "NP")).scalars().first()
+    if nepal:
+        for d in db.execute(select(M.Distributor).where(M.Distributor.country_id.is_(None))).scalars():
+            if (d.name or "").strip().upper() in DIST_IDS:
+                d.country_id = nepal.id
+                done.append(f"{d.name} set in Nepal")
+    db.commit()
+    return done
+
+
 def ensure_masters(db: Session) -> None:
     """Same rule as the distributors: add what is missing, never edit."""
     for code, name, cur in COUNTRIES:

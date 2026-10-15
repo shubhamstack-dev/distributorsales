@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { api } from '../api.js'
 
 const money = (n) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -30,9 +30,9 @@ export default function BatchDetail() {
           <p className="lead">{b.month} {b.year}, Mid Month {b.mid_month}. Uploaded {b.as_of} by
             {' '}{b.created_by}; month cut-off day {b.cutoff_day}, Mid Month day {b.mid_cutoff_day}.</p></div>
         <div className="actions">
-          <button className="btn primary" onClick={() => api.download(b.id)
+          {!b.rows_replaced && <button className="btn primary" onClick={() => api.download(b.id)
             .then((n) => setMsg({ t: `${n} downloaded.` }))
-            .catch((e) => setMsg({ bad: true, t: e.message }))}>Download Excel</button>
+            .catch((e) => setMsg({ bad: true, t: e.message }))}>Download Excel</button>}
           <button className="btn danger" onClick={async () => {
             if (!confirm(`Delete batch ${b.id} and its ${b.rows} rows?`)) return
             try { await api.deleteBatch(b.id); nav('/batches') }
@@ -42,6 +42,12 @@ export default function BatchDetail() {
       </div>
       {msg && <div className={`alert ${msg.bad ? 'bad' : 'ok'}`}>{msg.t}</div>}
       {b.notes && <div className="alert info">{b.notes}</div>}
+      {b.rows_replaced && (
+        <div className="alert">This batch's rows were replaced by a later conversion: the sales rows
+          table keeps the last one only. Its sales are in{' '}
+          <Link to="/masters/sales">Sales (MAPPING_MASTER)</Link>
+          {b.mid_month === 'Y' && <> and <Link to="/masters/mid_sales">Mid sales (MAPPING_MASTER_MID)</Link></>}.</div>
+      )}
 
       <div className="kpis">
         <div className="kpi hl"><div className="k">Rows</div><div className="v">{b.rows}</div>

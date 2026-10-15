@@ -48,6 +48,9 @@ class Distributor(Base):
     contact_person: Mapped[str | None] = mapped_column("ContactPerson", String(120))
     phone: Mapped[str | None] = mapped_column("Phone", String(30))
     email: Mapped[str | None] = mapped_column("Email", String(120))
+    # DIST_ID in MAPPING_MASTER: the distributor's number in the old system
+    # (PHARMACHEM 18671704, YETICHEM 16212104, GUNJESHWARI 12664157).
+    dist_id: Mapped[int | None] = mapped_column("DistId", Integer)
 
 
 class Batch(Base):
@@ -101,7 +104,11 @@ class BatchFile(Base):
 
 
 class SalesRow(Base):
-    """One output row, exactly the twelve columns the sheet carries."""
+    """One output row, the twelve columns the sheet carries, plus the master IDs.
+
+    Holds the last conversion only: it is emptied (TRUNCATE) before each
+    conversion's rows go in, and each row is copied on insert into
+    MAPPING_MASTER or MAPPING_MASTER_MID, which keep the history."""
     __tablename__ = "sales_row"
     __table_args__ = (UniqueConstraint("BatchId", "Seq", name="uq_row_seq"),
                       Index("ix_row_batch", "BatchId"))
@@ -125,6 +132,11 @@ class SalesRow(Base):
     amount: Mapped[float] = mapped_column("Amount", Numeric(18, 2), nullable=False, default=0)
     source_file: Mapped[str | None] = mapped_column("SourceFile", String(255))
     is_return: Mapped[int] = mapped_column("IsReturn", Integer, nullable=False, default=0)
+    # The master rows the names were matched to (name or alias) before the rows
+    # went in. The table's AFTER INSERT triggers (services/triggers.py) use them
+    # to write the row into MAPPING_MASTER / MAPPING_MASTER_MID.
+    customer_id: Mapped[int | None] = mapped_column("CustomerId", Integer)
+    product_id: Mapped[int | None] = mapped_column("ProductId", Integer)
 
     batch: Mapped[Batch] = relationship(back_populates="rows")
 

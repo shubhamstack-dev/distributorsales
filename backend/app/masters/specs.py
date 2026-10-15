@@ -323,6 +323,9 @@ SPECS: list[Spec] = [
 
     Spec("distributor", "Distributors", "Setup", M.Distributor, [
         Field("name", "Name", required=True, cols=["DISTRIBUTOR_NAME"]),
+        Field("dist_id", "DIST_ID", "int", cols=["DIST_ID", "DISTRIBUTOR_ID"],
+              help="The distributor's number in the old system, as MAPPING_MASTER.DIST_ID "
+                   "carries it (e.g. 18671704). Converting needs it."),
         Field("code", "Code", "code", cols=["DISTRIBUTOR_CODE"]),
         Field("country_id", "Country", "ref", ref="country"),
         Field("contact_person", "Contact person"),
@@ -650,7 +653,7 @@ LAYOUT = {
                                 _cols(("Customer Classification Id", "id"),
                                       ("Customer Classification", "description", 1), A)),
     "distributor": ("Distributor/Vendor", "Master data",
-                    _cols(("Distributor Id", "id"), ("Distributor Name", "name", 1), A)),
+                    _cols(("Distributor Id", "dist_id"), ("Distributor Name", "name", 1), A)),
     "employee": ("Employee", "Master data",
                  _cols(("Employee Id", "id"), ("Employee SAP Id", "employee_code"),
                        ("Employee Name", "full_name", 1), ("Email", "email"),

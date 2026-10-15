@@ -24,7 +24,9 @@ ADDED = {
         ("SalesSheet", "INT NULL"),
         ("ReturnSheet", "INT NULL"),
         ("ProductKeepDot", "INT NOT NULL DEFAULT 0"),
+        ("DistId", "INT NULL"),
     ],
+    "sales_row": [("CustomerId", "INT NULL"), ("ProductId", "INT NULL")],
     "batch": [("MidCutoffDay", "INT NULL")],
     # the Master ID the Excel master tables point at
     **{t: [("LegacyId", "INT NULL")] for t in (

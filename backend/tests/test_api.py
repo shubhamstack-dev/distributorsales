@@ -7,7 +7,7 @@ import openpyxl
 import pytest
 from sqlalchemy import select
 
-from tests.harness import client as c, anon, Testing, ok, sign_in
+from tests.harness import client as c, anon, Testing, ok, sign_in, commit_ok
 from app import models as M
 from app.services.rules import period
 from app.services.parse import clean, read_book, books_in
@@ -120,9 +120,9 @@ def batch(tok):
     assert len(r["files"]) == 10
     suggested = [f["name"] for f in r["files"] if f["suggested"]]
     assert sorted(suggested) == PW              # the rule picks its own files
-    done = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    done = commit_ok(r['token'], H(tok), {
         "distributor_id": d["id"], "as_of": "2026-09-25", "files": suggested,
-        "source": r["source"], "who": "tester"}))
+        "source": r["source"], "who": "tester"})
     return done
 
 
@@ -233,9 +233,9 @@ def test_a_batch_can_be_deleted_and_takes_its_rows(tok):
     with open(ZIP, "rb") as fh:
         r = ok(c.post("/api/uploads/inspect", headers=H(tok), data={"distributor_id": d["id"]},
                       files=[("files", ("z.zip", fh.read(), "application/zip"))]))
-    made = ok(c.post(f"/api/uploads/{r['token']}/commit", headers=H(tok), json={
+    made = commit_ok(r['token'], H(tok), {
         "distributor_id": d["id"], "as_of": "2026-09-25",
-        "files": [f["name"] for f in r["files"] if f["suggested"]]}))
+        "files": [f["name"] for f in r["files"] if f["suggested"]]})
     bid = made["batch_id"]
     ok(c.delete(f"/api/batches/{bid}", headers=H(tok)), 204)
     assert c.get(f"/api/batches/{bid}", headers=H(tok)).status_code == 404
