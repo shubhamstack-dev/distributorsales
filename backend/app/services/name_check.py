@@ -1,10 +1,10 @@
 """Before a conversion goes in: is every customer and product in the masters?
 
-A name in the distributor's file is matched to CUSTOMER_MASTER by its
-CUSTOMER_NAME or any of CUSTOMER_ALIAS_1..50, and to PRODUCT_MASTER by its
-SAP_PRODUCT_NAME or any of PRODUCT_ALIAS_1..100, with spaces, punctuation and
-case ignored (services/names.norm, as the distributor name lists match). Both
-the name as read and the name after the distributor's own name list are tried.
+A name in the distributor's file is matched to CUSTOMER_MASTER / PRODUCT_MASTER
+by services/name_match.py: name or alias, then the spellings MAPPING_MASTER's
+history has met, then a match chosen by hand, then the name cleaned, shortened
+or nearly alike — only where exactly one master fits. Both the name as read and
+the name after the distributor's own name list are tried.
 
 The conversion is refused, and nothing is written, when
 * a customer or product matches nothing: create it in the masters, or add the
@@ -16,38 +16,37 @@ The conversion is refused, and nothing is written, when
 """
 from __future__ import annotations
 
-from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import models_master as X
+from .. import models as M, models_master as X
+from .name_match import Matcher
 from .names import norm
 
 
-class Index:
-    """norm(name or alias) -> the master's ID. Inactive rows match too: an
+def matchers(db: Session, dist) -> tuple[Matcher, Matcher]:
+    """Customer and product matchers fed with the masters (names and aliases),
+    the history in MAPPING_MASTER and MAPPING_MASTER_MID (this distributor's
+    first), and the matches chosen by hand. Inactive masters match too: an
     inactive product's sales are still its sales."""
-
-    def __init__(self, db: Session, model, name_attr: str, prefix: str, count: int):
-        self.ids: dict[str, set[int]] = defaultdict(set)
-        cols = [getattr(model, name_attr)] + [getattr(model, f"alias_{i}") for i in range(1, count + 1)]
-        for row in db.execute(select(model.id, *cols)):
-            rid, *names = row
-            for n in names:
-                k = norm(n)
-                if k:
-                    self.ids[k].add(rid)
-        self.twice: set[str] = set()              # names two masters both claim
-
-    def find(self, *names) -> int | None:
-        for n in names:
-            hit = self.ids.get(norm(n))
-            if hit:
-                if len(hit) > 1:
-                    self.twice.add(str(n))
-                return min(hit)
-        return None
+    cust, prod = Matcher("customer"), Matcher("product")
+    C, P = X.CustomerMaster, X.ProductMaster
+    for m, model, name_attr, n in ((cust, C, "customer_name", X.CUSTOMER_ALIASES),
+                                    (prod, P, "sap_product_name", X.PRODUCT_ALIASES)):
+        cols = [getattr(model, name_attr)] + [getattr(model, f"alias_{i}") for i in range(1, n + 1)]
+        for rid, *names in db.execute(select(model.id, *cols)):
+            m.add_master(rid, *names)
+    for T in (X.SalesMapping, X.MidSalesMapping):
+        for m, name_col, id_col in ((cust, T.customer_name, T.customer_id),
+                                    (prod, T.product_name, T.product_id)):
+            for name, mid, dist_id, rows in db.execute(
+                    select(name_col, id_col, T.dist_id, func.count())
+                    .where(id_col.is_not(None)).group_by(name_col, id_col, T.dist_id)):
+                m.add_history(name, mid, rows, own=dist.dist_id is not None and dist_id == dist.dist_id)
+    for kind, name, mid in db.execute(select(M.NameMatch.kind, M.NameMatch.name, M.NameMatch.master_id)):
+        (cust if kind == "customer" else prod).add_chosen(name, mid)
+    return cust, prod
 
 
 def _groups(db: Session) -> dict[int, int | None]:
@@ -62,8 +61,8 @@ def check(db: Session, rows: list[dict], dist) -> dict:
     """rows: dicts with customer / product (as read) and customer_as / product_as
     (after the distributor's name list), and file. Sets customer_id / product_id
     on each row. Returns what stops the conversion, empty lists when nothing does."""
-    cust = Index(db, X.CustomerMaster, "customer_name", "CUSTOMER_ALIAS_", X.CUSTOMER_ALIASES)
-    prod = Index(db, X.ProductMaster, "sap_product_name", "PRODUCT_ALIAS_", X.PRODUCT_ALIASES)
+    cust, prod = matchers(db, dist)
+    how: dict[str, dict] = {"customer": {}, "product": {}}   # name -> (master, level), shown after
     groups = _groups(db)
     assigned = {(c, g) for c, g in db.execute(select(X.CustomerTerrAssignment.customer_id,
                                                      X.CustomerTerrAssignment.product_group_id))}
@@ -75,14 +74,19 @@ def check(db: Session, rows: list[dict], dist) -> dict:
     no_group: dict[str, dict] = {}
     unassigned: dict[tuple, dict] = {}
     for r in rows:
-        r["customer_id"] = cid = cust.find(r["customer_as"], r["customer"])
-        r["product_id"] = pid = prod.find(r["product_as"], r["product"])
-        if cid is None:
-            e = new_c.setdefault(norm(r["customer_as"]), {"name": r["customer_as"], "rows": 0, "files": set()})
-            e["rows"] += 1
-            e["files"].add(r["file"])
-        if pid is None:
-            e = new_p.setdefault(norm(r["product_as"]), {"name": r["product_as"], "rows": 0, "files": set()})
+        cid, clevel = cust.find(r["customer_as"], r["customer"])
+        pid, plevel = prod.find(r["product_as"], r["product"])
+        r["customer_id"], r["product_id"] = cid, pid
+        for kind, mid, level, name, m in (("customer", cid, clevel, r["customer_as"], cust),
+                                          ("product", pid, plevel, r["product_as"], prod)):
+            if mid is not None:
+                if level not in ("exact", "history"):
+                    how[kind][name] = {"name": name, "master_id": mid,
+                                       "master": m.names.get(mid), "level": level}
+                continue
+            book = new_c if kind == "customer" else new_p
+            e = book.setdefault(norm(name), {"name": name, "rows": 0, "files": set(),
+                                             "suggestions": m.suggest(name)})
             e["rows"] += 1
             e["files"].add(r["file"])
         if cid is None or pid is None:
@@ -114,7 +118,11 @@ def check(db: Session, rows: list[dict], dist) -> dict:
         "products_without_group": listed(no_group),
         "customers_not_assigned": listed(unassigned),
         "dist_id_missing": dist.dist_id is None,
-        "matched_twice": sorted(cust.twice | prod.twice),
+        "matched_twice": [],
+        # names placed by the cleaned / shortened / similar / chosen levels: listed on
+        # the batch so a person can glance over them
+        "matched_by_likeness": sorted(how["customer"].values(), key=lambda e: e["name"])
+                               + sorted(how["product"].values(), key=lambda e: e["name"]),
     }
     return problems
 

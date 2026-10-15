@@ -386,9 +386,11 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     mapped.append(f"{seq} rows into " + " and ".join(
         f"{t}" + (f" (replacing {n} earlier rows of {d.name} for {p['month']} {p['year']})" if n else "")
         for t, n in replaced.items()) + ".")
-    if problems["matched_twice"]:
-        mapped.append("Names two masters both carry (the lower ID was used): "
-                      + ", ".join(problems["matched_twice"][:10]) + ".")
+    alike = problems["matched_by_likeness"]
+    if alike:
+        mapped.append("Matched by likeness, worth a glance: " + "; ".join(
+            f"{e['name']} = {e['master']} ({e['level']})" for e in alike[:40])
+            + (f"; and {len(alike) - 40} more" if len(alike) > 40 else "") + ".")
     batch.notes = " ".join(([batch.notes] if batch.notes else []) + mapped)
     batch.row_count, batch.omitted_count = seq, omitted
     batch.total_qty, batch.total_amount = tot_q, round(tot_a, 2)
@@ -398,9 +400,37 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
             "total_qty": tot_q, "total_amount": round(tot_a, 2),
             "month": p["month"], "year": p["year"], "mid_month": p["mid_month"],
             "wrapped": p["wrapped"], "mapping_tables": list(replaced),
-            "mapping_replaced": replaced, "matched_twice": problems["matched_twice"],
+            "mapping_replaced": replaced, "matched_by_likeness": alike,
             "unmatched_customers": sorted(map_customer.missed),
             "unmatched_products": sorted(map_product.missed)}
+
+
+@router.post("/name-match")
+def name_match(body: dict = Body(...), db: Session = Depends(get_db)):
+    """A spelling from a file matched to a master by hand (Convert's panel):
+    {kind: customer | product, name, master_id}. Saved once, used for every
+    distributor; choosing again for the same spelling replaces the choice."""
+    kind = body.get("kind")
+    model = {"customer": X.CustomerMaster, "product": X.ProductMaster}.get(kind)
+    name = (body.get("name") or "").strip()
+    key = namesvc.norm(name)
+    if model is None or not key:
+        raise HTTPException(422, "Give kind (customer or product) and the name.")
+    try:
+        mid = int(body.get("master_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Choose the customer or product it is.")
+    if db.get(model, mid) is None:
+        raise HTTPException(404, f"No {kind} {mid}.")
+    row = db.execute(select(M.NameMatch).where(M.NameMatch.kind == kind,
+                                               M.NameMatch.name_key == key)).scalars().first()
+    if row is None:
+        row = M.NameMatch(kind=kind, name_key=key[:200])
+        db.add(row)
+    row.name, row.master_id = name[:200], mid
+    row.created_by, row.created_at_utc = (body.get("who") or "user")[:120], _now().isoformat(timespec="seconds")
+    db.commit()
+    return {"kind": kind, "name": row.name, "master_id": mid}
 
 
 # ------------------------------------------------------------------ batches

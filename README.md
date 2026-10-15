@@ -68,13 +68,36 @@ right files? — is answered inside the workbook.
 ## Converting into MAPPING_MASTER
 
 **Names are checked first** (`services/name_check.py`). When Convert is pressed,
-the chosen files are read and every customer and product is looked up — the
-customer in CUSTOMER_MASTER by CUSTOMER_NAME or any CUSTOMER_ALIAS_1..50, the
-product in PRODUCT_MASTER by SAP_PRODUCT_NAME or any PRODUCT_ALIAS_1..100, with
-spaces, punctuation and case ignored. **Nothing is converted** when
+the chosen files are read and every customer and product is matched to its
+master by `services/name_match.py`, **without an alias for each spelling**:
 
-* a customer or product matches nothing — create it, or add the file's spelling
-  as an alias of the right one;
+1. the master's name or an alias (punctuation, spaces and case ignored);
+2. **history**: a spelling MAPPING_MASTER / MAPPING_MASTER_MID already carries
+   beside its CUSTOMER_ID / PRODUCT_ID (the old system's 100,000 rows, and
+   every conversion since) — the distributor's own first;
+3. a match chosen by hand on Convert (table `name_match`, no limit);
+4. the name **cleaned**: for a customer of company words and plurals (Pvt,
+   Ltd, P, &, AND); for a product of tablet / capsule words, units, packing and
+   pack size (TAB, MG, PET, 15S, 5X10S, 1X28), a part written twice once
+   ("225ML 225ML"), and one spelling for SYP / SYR / SYRUP, GM / G …;
+5. the name **shortened** or with a town code ("Baibhav Binayak Pharmaceutic",
+   "KAMANA MEDICINE DIST KTM", "DIGENE GEL O" = ORANGE), unless another master
+   begins the same way;
+6. a **nearly alike** name (customers 90 %+, products 92 %+, clearly ahead of
+   the next).
+
+A level is used only when it points at exactly one master. From level 4 on, a
+customer's numbers must agree; a product's strength must (UDILIV 150MG is never
+300MG, THYRONORM 37.5 never 75), and so must its form and variant words
+(APNICAF INJ is not APNICAF ORAL, ROVAMYCIN not ROVAMYCIN FORTE, STEMETIL not
+STEMETIL MD). Measured on the real history, spellings never seen before:
+customers 99.3 % right (78 % placed, the rest asked), products 100 % right (80 %
+placed, the rest asked); spellings seen before are found by history. Names placed by levels 4–6 are listed on the batch
+for a glance. A name nothing places is shown with the three closest masters to
+choose from in one click. **Nothing is converted** when
+
+* a customer or product matches nothing — choose it from the suggestions (or
+  any other), or create it;
 * a product has no product group (on the SKU or its brand);
 * a customer has no territory for the product's group in
   CUSTOMER_TERR_ASSIGNMENT (assign it on Customer Terr-PG): MAPPING_MASTER

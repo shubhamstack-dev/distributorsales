@@ -416,3 +416,10 @@ td.row-actions>div{display:inline-flex;gap:6px}
 
 /* scrolled to after Convert: clear of the sticky top bar */
 .convert-result{scroll-margin-top:calc(80px + env(safe-area-inset-top, 0px))}
+.choose-rows td.pick{min-width:420px}
+.choose-rows .sugg{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.choose-rows .sugg .btn{white-space:normal;text-align:left}
+.choose-rows .other{display:flex;gap:6px;align-items:center}
+.choose-rows .other .refsel{flex:1}
+.choose-rows .files{display:block;margin-top:2px}
+.choose-rows tr.done td{opacity:.75}

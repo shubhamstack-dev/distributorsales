@@ -116,6 +116,8 @@ export const api = {
   // Customer / Employee Terr-PG: the two assignment tables of a kind, joined
   // create / delete / assign all / clean on the assignment pages; dry_run only counts
   assign: (kind, action, body) => call('POST', `/api/assign/${kind}/${action}`, body),
+  // a file's spelling matched to a master by hand, on Convert's panel
+  nameMatch: (kind, name, masterId) => call('POST', '/api/name-match', { kind, name, master_id: masterId }),
   dataError: (distributorId, fileType) =>
     call('GET', `/api/data-error?${qs({ distributor_id: distributorId, file_type: fileType })}`),
   terrPg: (kind, params) => call('GET', `/api/terr-pg/${kind}?${qs(params)}`),

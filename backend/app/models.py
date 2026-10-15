@@ -159,3 +159,19 @@ class NameRef(Base):
     norm_name: Mapped[str] = mapped_column("NormName", String(200), nullable=False)
     source_file: Mapped[str | None] = mapped_column("SourceFile", String(255))
     uploaded_at_utc: Mapped[datetime] = mapped_column("UploadedAtUtc", DateTime, nullable=False)
+
+
+class NameMatch(Base):
+    """A distributor's spelling matched to a master by hand on the Convert
+    screen ("Om Medic" is customer 802), for a name nothing else could place.
+    Unlimited, unlike the alias columns; once the name has been converted,
+    MAPPING_MASTER's history knows it too (services/name_match.py)."""
+    __tablename__ = "name_match"
+    __table_args__ = (UniqueConstraint("Kind", "NameKey", name="uq_name_match"),)
+    id: Mapped[int] = mapped_column("Id", Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column("Kind", String(10), nullable=False)          # customer | product
+    name_key: Mapped[str] = mapped_column("NameKey", String(200), nullable=False)  # names.norm
+    name: Mapped[str] = mapped_column("Name", String(200), nullable=False)
+    master_id: Mapped[int] = mapped_column("MasterId", Integer, nullable=False)
+    created_by: Mapped[str | None] = mapped_column("CreatedBy", String(120))
+    created_at_utc: Mapped[str | None] = mapped_column("CreatedAtUtc", String(40))

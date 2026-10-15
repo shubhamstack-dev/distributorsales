@@ -79,6 +79,7 @@ def test_new_names_stop_the_conversion_and_say_which(h, yeti):
     assert [e["name"] for e in d["new_customers"]] == ["Om Medicals", "Rantoks Pharma Pvt ltd"]
     assert [e["name"] for e in d["new_products"]] == ["PAN 40 TAB", "STEMETIL 5MG TAB"]
     assert d["new_products"][0]["files"] == ["AHCPW.xls"]
+    assert all("suggestions" in e for e in d["new_customers"] + d["new_products"])
     assert count(M.SalesRow) == 0 and count(X.MidSalesMapping, dist_name="Yetichem") == 0
     # the upload is kept: once the masters are right it converts without sending it again
     assert convert(h, yeti, token, "2026-10-20").status_code == 409
@@ -191,3 +192,19 @@ def test_data_error_counts_repeats_and_rows_without_an_hq(h, yeti):
     assert (d["main"], d["duplicates"], d["incomplete"]) == (5, 1, 1)
     assert len(d["duplicate_rows"]) == 2 and d["incomplete_rows"][0]["invoice_no"] == "X-1"
     assert c.get("/api/data-error?distributor_id=1&file_type=stock", headers=h).status_code == 422
+
+
+def test_an_unknown_name_comes_with_suggestions_and_can_be_chosen(h):
+    from app.routers import api as A                                # noqa: F401
+    r = c.post("/api/name-match", headers=h, json={"kind": "customer", "name": "Om Medic Hall",
+                                                   "master_id": 802})
+    assert r.status_code == 200
+    db = Testing()
+    try:
+        assert db.execute(select(M.NameMatch.master_id).where(M.NameMatch.name == "Om Medic Hall")).scalar() == 802
+    finally:
+        db.close()
+    assert c.post("/api/name-match", headers=h, json={"kind": "customer", "name": "X",
+                                                      "master_id": 999999}).status_code == 404
+    assert c.post("/api/name-match", headers=h, json={"kind": "stock", "name": "X",
+                                                      "master_id": 1}).status_code == 422

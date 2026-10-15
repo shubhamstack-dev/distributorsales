@@ -276,11 +276,11 @@ export default function Upload() {
 function Blocked({ p, busy, onRetry, onClose }) {
   const parts = [
     { key: 'new_customers', title: 'Customers not in Customer/Hospital',
-      what: 'Create the customer, or add this spelling as an alias of the right one.',
+      what: 'Nothing in the masters or their history is sure to be this name. Choose the customer it is (closest first), or create it.',
       to: '/masters/customer', link: 'Customer/Hospital',
       cols: ['Name in the file', 'Rows', 'Files'], row: (e) => [e.name, e.rows, e.files.join(', ')] },
     { key: 'new_products', title: 'Products not in SKU',
-      what: 'Create the SKU, or add this spelling as an alias of the right one.',
+      what: 'Nothing in the masters or their history is sure to be this name. Choose the SKU it is (closest first), or create it.',
       to: '/masters/sku', link: 'SKU',
       cols: ['Name in the file', 'Rows', 'Files'], row: (e) => [e.name, e.rows, e.files.join(', ')] },
     { key: 'products_without_group', title: 'Products with no product group',
@@ -321,7 +321,9 @@ function Blocked({ p, busy, onRetry, onClose }) {
         <div key={x.key} className="blocked-part">
           <h3>{x.title} <span className="count">{p[x.key].length}</span></h3>
           <p className="fine">{x.what} <Link to={x.to}>Open {x.link}</Link></p>
-          {x.key === 'customers_not_assigned' ? <AssignRows list={p[x.key]} /> : <>
+          {x.key === 'customers_not_assigned' ? <AssignRows list={p[x.key]} />
+            : x.key === 'new_customers' || x.key === 'new_products'
+              ? <ChooseRows kind={x.key === 'new_customers' ? 'customer' : 'product'} list={p[x.key]} /> : <>
           <div className="scroll"><table className="grid-old">
             <thead><tr>{x.cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
             <tbody>{p[x.key].slice(0, 200).map((e, i) => (
@@ -398,6 +400,56 @@ function AssignRows({ list }) {
           {busy ? 'Assigning…' : `Assign all ${list.length - done} to the territory chosen`}</button>
         {done > 0 && <span className="fine">{done} assigned. Convert again when the rest are done.</span>}
       </div>
+    </>
+  )
+}
+
+
+/** Names no master was sure of: the closest masters to choose from, one click
+ *  each, or any other from the list. The choice is kept (not as an alias), and
+ *  once converted the name is in the history, so it is never asked again. */
+function ChooseRows({ kind, list }) {
+  const [done, setDone] = useState({})            // i -> {ok, t}
+  const [other, setOther] = useState({})          // i -> id chosen from the list
+  const slug = kind === 'customer' ? 'customer' : 'sku'
+
+  async function choose(i, id, label) {
+    try {
+      await api.nameMatch(kind, list[i].name, id)
+      setDone((d) => ({ ...d, [i]: { ok: true, t: `= ${label}` } }))
+    } catch (e) { setDone((d) => ({ ...d, [i]: { ok: false, t: e.message } })) }
+  }
+  const chosen = list.filter((_, i) => done[i]?.ok).length
+
+  return (
+    <>
+      <div className="scroll"><table className="grid-old choose-rows">
+        <thead><tr><th>Name in the file</th><th>Rows</th><th>Is it…?</th></tr></thead>
+        <tbody>{list.slice(0, 200).map((e, i) => (
+          <tr key={i} className={done[i]?.ok ? 'done' : ''}>
+            <td><span className="primary-name">{e.name}</span><small className="fine files">{e.files.join(', ')}</small></td>
+            <td>{e.rows}</td>
+            <td className="pick">
+              {done[i]?.ok ? <span className="chip ok">{done[i].t}</span> : <>
+                <div className="sugg">
+                  {(e.suggestions || []).map((s) => (
+                    <button key={s.id} className="btn sm" title={`${s.id} · ${Math.round(s.score * 100)}% alike`}
+                            onClick={() => choose(i, s.id, s.name)}>
+                      {s.name} <span className="faint">{Math.round(s.score * 100)}%</span></button>
+                  ))}
+                </div>
+                <div className="other">
+                  <RefSelect slug={slug} blank="Another…" value={other[i] ?? null}
+                             onChange={(v) => setOther((o) => ({ ...o, [i]: v }))} />
+                  <button className="btn sm" disabled={!other[i]} onClick={() => choose(i, other[i], `#${other[i]}`)}>Use</button>
+                </div>
+                {done[i] && !done[i].ok && <small className="bad-text">{done[i].t}</small>}
+              </>}
+            </td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      {chosen > 0 && <p className="fine">{chosen} chosen. Convert again when the rest are chosen or created.</p>}
     </>
   )
 }
