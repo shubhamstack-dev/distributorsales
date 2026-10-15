@@ -27,9 +27,9 @@ ADDED = {
         ("DistId", "INT NULL"),
         ("FileCurrency", "VARCHAR(3) NULL"),
     ],
-    "batch": [("NprRate", "DECIMAL(18,6) NULL")],
+    # one key per table: a second "batch" would silently replace the first
+    "batch": [("MidCutoffDay", "INT NULL"), ("NprRate", "DECIMAL(18,6) NULL")],
     "sales_row": [("CustomerId", "INT NULL"), ("ProductId", "INT NULL")],
-    "batch": [("MidCutoffDay", "INT NULL")],
     # the Master ID the Excel master tables point at
     **{t: [("LegacyId", "INT NULL")] for t in (
         "md_zone", "md_headquarter", "md_territory", "md_product_group",

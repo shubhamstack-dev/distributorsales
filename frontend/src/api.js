@@ -26,7 +26,11 @@ async function handle(res) {
     // detail may be an object with a message and the lists behind it (a refused conversion)
     throw new ApiError(res.status, typeof d === 'string' ? d
       : Array.isArray(d) ? d.map((x) => x.msg || JSON.stringify(x)).join('; ')
-      : d?.message || data?.message || res.statusText, d && typeof d === 'object' && !Array.isArray(d) ? d : null)
+      : d?.message || data?.message || res.statusText
+        // never an empty message: over HTTPS a crash comes back with no status text
+        || `The server stopped with error ${res.status} and gave no reason. Nothing was saved; `
+          + 'the reason is in the server log (docker compose logs --tail=80 backend).',
+      d && typeof d === 'object' && !Array.isArray(d) ? d : null)
   }
   return data
 }
