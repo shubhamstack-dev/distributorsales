@@ -39,6 +39,10 @@ export default function Upload() {
   const [over, setOver] = useState(false)
   const [err, setErr] = useState('')
   const [blocked, setBlocked] = useState(null)   // a refused conversion's lists
+  const result = useRef(null)
+  useEffect(() => {
+    if ((blocked || err) && result.current) result.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [blocked, err])
   const pick = useRef(null)
   const [lists, setLists] = useState(null)
   const [listMsg, setListMsg] = useState(null)
@@ -116,8 +120,7 @@ export default function Upload() {
       <h1>Convert</h1>
       <p className="lead">Drop the zip a distributor sends, choose the files that belong to this run,
         and the rows are kept as a batch and given back as the standard twelve-column sheet.</p>
-      {err && <div className="alert bad">{err}</div>}
-      {blocked && <Blocked p={blocked} busy={busy} onRetry={convert} onClose={() => setBlocked(null)} />}
+      {err && !found && <div className="alert bad">{err}</div>}
 
       <section className="panel">
         <div className="panel-head"><span className="step">1</span>
@@ -258,6 +261,11 @@ export default function Upload() {
           </div>
         </section>
       )}
+      {/* what Convert said goes under its button, where the eye is, and scrolls into view */}
+      <div ref={result} className="convert-result">
+        {err && found && <div className="alert bad">{err}</div>}
+        {blocked && <Blocked p={blocked} busy={busy} onRetry={convert} onClose={() => setBlocked(null)} />}
+      </div>
     </div>
   )
 }

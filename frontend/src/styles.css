@@ -413,3 +413,6 @@ td.row-actions>div{display:inline-flex;gap:6px}
 .de-box b{font:600 1.25rem var(--mono);color:var(--ink)}
 .de-box.warn{border-color:rgba(255,107,107,.5)}
 .de-box.warn b{color:var(--bad)}
+
+/* scrolled to after Convert: clear of the sticky top bar */
+.convert-result{scroll-margin-top:calc(80px + env(safe-area-inset-top, 0px))}
