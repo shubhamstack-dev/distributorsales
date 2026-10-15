@@ -25,7 +25,9 @@ ADDED = {
         ("ReturnSheet", "INT NULL"),
         ("ProductKeepDot", "INT NOT NULL DEFAULT 0"),
         ("DistId", "INT NULL"),
+        ("FileCurrency", "VARCHAR(3) NULL"),
     ],
+    "batch": [("NprRate", "DECIMAL(18,6) NULL")],
     "sales_row": [("CustomerId", "INT NULL"), ("ProductId", "INT NULL")],
     "batch": [("MidCutoffDay", "INT NULL")],
     # the Master ID the Excel master tables point at

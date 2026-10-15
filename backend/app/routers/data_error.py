@@ -15,11 +15,15 @@ file_type: invoice -> MAPPING_MASTER, mid -> MAPPING_MASTER_MID.
 * Incomplete in Main: rows without a product, customer or HQ.
 * Duplicate Records: rows repeating another's invoice, customer, product,
   quantities and rate; the repeats are counted, not the first of each.
-* Sum of Amount in Main (NPR): SALES_VALUE summed as the file gives it. The
-  files' amounts and rates are NPR and are kept so; no exchange rate is applied.
-  (The old screen labels this sum INR; it is the same NPR figure.)
+* Sum of Amount in Main: SALES_QTY x RATE summed, as the old screen does it
+  (MAPPING_MASTER's rates are NPR, and the old rows carry no SALES_VALUE), and
+  that in INR at the INR/NPR Currency rate in force on the conversion's day.
+  For Yetichem, whose files are INR, this gives back the files' total, give or
+  take the rounding of each rate to 2 places in NPR.
 """
 from __future__ import annotations
+
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, or_, select
@@ -27,10 +31,12 @@ from sqlalchemy.orm import Session
 
 from .. import models as M, models_master as X
 from ..database import get_db
+from .masters import rate_on
 
 router = APIRouter(prefix="/api")
 
 TYPES = {"invoice": X.SalesMapping, "mid": X.MidSalesMapping}
+CENT = Decimal("0.01")
 DUP_KEY = ("invoice_no", "customer_id", "product_id", "sales_qty", "free_quantity",
            "return_quantity", "rate")
 
@@ -57,7 +63,7 @@ def data_error(distributor_id: int, file_type: str = "invoice", db: Session = De
     out = {"distributor": d.name, "dist_id": d.dist_id, "table": T.__tablename__,
            "batch_id": None, "month": None, "year": None, "mid_month": None, "as_of": None,
            "temp": 0, "main": 0, "not_inserted": 0, "incomplete": 0, "duplicates": 0,
-           "amount": 0.0, "note": None,
+           "amount_npr": 0.0, "amount_inr": None, "note": None,
            "duplicate_rows": [], "incomplete_rows": []}
     if b is None:
         out["note"] = f"{d.name} has no conversion that writes {T.__tablename__} yet."
@@ -87,7 +93,15 @@ def data_error(distributor_id: int, file_type: str = "invoice", db: Session = De
             rows += [_row(r) for r in db.execute(select(T).where(*mine, *cond).order_by(T.id)).scalars()]
         out["duplicate_rows"] = rows[:100]
 
-    # The amounts as the distributor's file gives them (NPR), summed; no rate applied.
-    out["amount"] = round(float(db.execute(
-        select(func.coalesce(func.sum(T.sales_value), 0)).where(*mine)).scalar()), 2)
+    # As the old screen: SALES_QTY x RATE summed (NPR; the old rows have no
+    # SALES_VALUE), and that in INR at the INR/NPR rate of the conversion's day.
+    npr = Decimal(str(db.execute(select(func.coalesce(func.sum(T.sales_qty * T.rate), 0))
+                                 .where(*mine)).scalar()))
+    out["amount_npr"] = float(npr.quantize(CENT, ROUND_HALF_UP))
+    try:
+        r = Decimal(str(rate_on(db, "INR", "NPR", b.as_of)["rate"]))
+        out["amount_inr"] = float((npr / r).quantize(CENT, ROUND_HALF_UP))
+        out["note"] = f"INR at {r.normalize()} NPR to the rupee, the rate in force on {b.as_of.isoformat()}."
+    except HTTPException as e:
+        out["note"] = f"{e.detail} Add it on Currency rates to see the amount in INR."
     return out

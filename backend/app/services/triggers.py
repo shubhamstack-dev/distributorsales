@@ -22,8 +22,12 @@ them the trigger takes:
 As in the old data, a return goes in as RETURN_QUANTITY (negative) with
 SALES_QTY and FREE_QUANTITY 0; CUSTOMER_NAME and PRODUCT_NAME are the names in
 the distributor's file, CUSTOMER_MASTER_NAME and PRODUCT_MASTER_NAME the
-masters'; PRODUCT_BRAND_CATEGORY is the brand's REPORTING. SALES_VALUE is the
-row's amount.
+masters'; PRODUCT_BRAND_CATEGORY is the brand's REPORTING.
+
+Money is NPR, whatever the file's currency: RATE is the file's rate times the
+batch's NprRate (the Currency rate from the distributor's file currency to NPR
+on the day converted; 1 for NPR files), rounded to 2 places, as the old system
+did it; SALES_VALUE is the quantity (a return's negative) times that RATE.
 
 The same SQL serves MySQL (production) and SQLite (tests). The triggers are
 dropped and made again on every start, so a change here reaches the database
@@ -44,10 +48,15 @@ COLUMNS = ["DIST_ID", "PRODUCT_NAME", "PRODUCT_ID", "PRODUCT_GROUP_ID", "RATE", 
            "RETURN_QUANTITY", "PRODUCT_MASTER_NAME", "PRODUCT_BRAND_CATEGORY"]
 
 GROUP = "COALESCE(p.PRODUCT_GROUP_ID, b.PRODUCT_GROUP_ID)"
+# The rate in NPR, as the old system kept it: the file's rate times the batch's
+# file-currency-to-NPR rate (1 for NPR files, 1.6 for Yetichem's INR), to 2 places.
+RATE_NPR = "ROUND(NEW.Rate * COALESCE(bt.NprRate, 1), 2)"
+SIGNED_QTY = "CASE WHEN NEW.IsReturn = 1 THEN -ABS(NEW.Quantity) ELSE NEW.Quantity END"
 VALUES = [
-    "d.DistId", "NEW.ProductName", "NEW.ProductId", GROUP, "NEW.Rate", "a.HQ_ID", "NEW.MonthName",
+    "d.DistId", "NEW.ProductName", "NEW.ProductId", GROUP, RATE_NPR, "a.HQ_ID", "NEW.MonthName",
     "NEW.Year", "a.TERRITORY_ID", "p.PRODUCT_BRAND_ID", "NEW.DistributorName",
-    "CASE WHEN NEW.IsReturn = 1 THEN 0 ELSE NEW.Quantity END", "NEW.Amount",
+    "CASE WHEN NEW.IsReturn = 1 THEN 0 ELSE NEW.Quantity END",
+    f"ROUND({SIGNED_QTY} * {RATE_NPR}, 2)",
     "NEW.CustomerName", "c.CUSTOMER_NAME", "g.Name", "h.Name", "t.Name", "b.PRODUCT_BRAND_NAME",
     "NEW.InvoiceNo", "NEW.CustomerId",
     "CASE WHEN NEW.IsReturn = 1 THEN 0 ELSE NEW.FreeQuantity END",

@@ -51,6 +51,10 @@ class Distributor(Base):
     # DIST_ID in MAPPING_MASTER: the distributor's number in the old system
     # (PHARMACHEM 18671704, YETICHEM 16212104, GUNJESHWARI 12664157).
     dist_id: Mapped[int | None] = mapped_column("DistId", Integer)
+    # The currency of the amounts and rates in this distributor's files. MAPPING_MASTER
+    # keeps NPR, so a conversion from INR files (Yetichem) turns its rates into NPR at
+    # the Currency rate of the day. Empty is NPR.
+    file_currency: Mapped[str | None] = mapped_column("FileCurrency", String(3))
 
 
 class Batch(Base):
@@ -68,6 +72,9 @@ class Batch(Base):
     cutoff_day: Mapped[int] = mapped_column("CutoffDay", Integer, nullable=False)
     mid_cutoff_day: Mapped[int | None] = mapped_column("MidCutoffDay", Integer)
     invoice_mode: Mapped[str] = mapped_column("InvoiceMode", String(10), nullable=False)
+    # file currency -> NPR on the day converted (1 for NPR files): the triggers write
+    # MAPPING_MASTER's RATE as ROUND(Rate x NprRate, 2), in NPR.
+    npr_rate: Mapped[float | None] = mapped_column("NprRate", Numeric(18, 6))
     row_count: Mapped[int] = mapped_column("RowCount", Integer, nullable=False, default=0)
     omitted_count: Mapped[int] = mapped_column("OmittedCount", Integer, nullable=False, default=0)
     total_qty: Mapped[float] = mapped_column("TotalQty", Numeric(18, 3), nullable=False, default=0)

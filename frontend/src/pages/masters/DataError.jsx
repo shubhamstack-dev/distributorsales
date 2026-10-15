@@ -34,7 +34,8 @@ export default function DataError() {
     ['Incomplete in Main', n(r.incomplete), r.incomplete > 0],
     ['Month', r.month || '—'],
     ['Year', r.year || '—'],
-    ['Sum of Amount in Main (NPR)', money(r.amount)],          // the files' own currency, unconverted
+    ['Sum of Amount in Main (INR)', money(r.amount_inr)],       // as the old screen
+    ['Sum of Amount in Main (NPR)', money(r.amount_npr)],       // as MAPPING_MASTER keeps it
   ]
 
   return (

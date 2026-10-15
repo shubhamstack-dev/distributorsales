@@ -130,7 +130,9 @@ def test_a_mid_month_row_goes_into_both_tables_with_the_assignment(h, yeti):
             stem.product_brand_category) == (503, "PRIMARY CARE", "STEMETIL", "P1")
     assert (stem.product_name, stem.product_master_name) == ("STEMETIL 5MG TAB", "STEMETIL 5 MG TABLET")
     assert (stem.customer_id, stem.customer_master_name) == (801, "RANTOKS PHARMA PVT LTD")
-    assert (stem.sales_qty, stem.sales_value, stem.return_quantity) == (40, 4000, 0)
+    # Yetichem's files are INR; MAPPING_MASTER keeps NPR: rate 100 INR x 1.6 = 160 NPR
+    assert (b["file_currency"], b["npr_rate"]) == ("INR", 1.6)
+    assert (stem.sales_qty, stem.rate, stem.sales_value, stem.return_quantity) == (40, 160, 6400, 0)
     om = [r for r in rows if r.customer_id == 802]
     assert om and all(r.customer_master_name == "OM MEDICAL STORE" for r in om)
 
@@ -171,8 +173,8 @@ def test_data_error_compares_temp_with_main(h, yeti):
     # the last conversion: October, Mid Month N, 3 rows, all in MAPPING_MASTER
     assert (r["month"], r["year"], r["table"]) == ("October", 2026, "MAPPING_MASTER")
     assert (r["temp"], r["main"], r["not_inserted"], r["incomplete"], r["duplicates"]) == (3, 3, 0, 0, 0)
-    assert r["amount"] == 2500                                   # 4000 - 2000 + 500
-    assert "amount_inr" not in r                                  # no exchange rate, as the old screen
+    # SALES_QTY x RATE in NPR (160 a unit: 40 - 20 + 5 units), and back in INR
+    assert (r["amount_npr"], r["amount_inr"]) == (4000, 2500)     # the files' 4000 - 2000 + 500
     m = ok(c.get(f"/api/data-error?distributor_id={yeti['id']}&file_type=mid", headers=h))
     # the last mid-month conversion's rows are no longer in sales_row; MID still has them
     assert (m["table"], m["temp"], m["main"], m["not_inserted"]) == ("MAPPING_MASTER_MID", 0, 3, 0)

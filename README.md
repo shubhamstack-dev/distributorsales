@@ -119,9 +119,9 @@ MAPPING_MASTER_MID), its last conversion's rows in Temp (`sales_row`) against
 Main (the table, for its DIST_ID, month and year), Records Not Inserted,
 Duplicate Records (same invoice, customer, product, quantities and rate),
 rows Incomplete in Main (no product, customer or HQ), Month, Year, and Sum of
-Amount in Main (NPR): the amounts as the files give them, summed, with no
-exchange rate (the files' amounts and rates are NPR, and MAPPING_MASTER keeps
-them so).
+Amount in Main as the old screen works it out: SALES_QTY x RATE summed (NPR),
+and that in INR at the INR/NPR rate of the day. Checked against the old screen
+on a real Yetichem month: 8,386,875.88 INR on both.
 
 **Then the rows go in:**
 
@@ -143,7 +143,14 @@ them so).
    PRODUCT_NAME as in the file beside CUSTOMER_MASTER_NAME and
    PRODUCT_MASTER_NAME; PRODUCT_BRAND_CATEGORY from the brand's REPORTING; and,
    as in the old data, a return as a negative RETURN_QUANTITY with SALES_QTY 0.
-   SALES_VALUE is the row's amount.
+
+**MAPPING_MASTER keeps NPR.** Each distributor has a FILE_CURRENCY
+(Distributor/Vendor): Yetichem's files are INR, Pharmachem's and Gunjeshwari's
+NPR. On Convert the Currency rate from the file currency to NPR on the day is
+kept on the batch (NprRate; 1 for NPR, 1.6 for INR), and the triggers write
+RATE = ROUND(rate x NprRate, 2) in NPR, as the old system did, and SALES_VALUE =
+quantity x RATE. With no rate for the day, nothing is converted. `sales_row`
+and the batch's twelve-column sheet keep the file's own currency.
 
 If the triggers cannot be made (the database user lacks the TRIGGER privilege,
 or binary logging is on for a user without SUPER), startup says so and Convert

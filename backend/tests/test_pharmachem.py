@@ -19,7 +19,7 @@ import zipfile
 import openpyxl
 import pytest
 
-from tests.harness import client as c, ok, sign_in, commit_ok
+from tests.harness import client as c, ok, sign_in, commit_ok, Testing
 from app.services import parse
 from app.services.rules import period
 from datetime import date
@@ -207,3 +207,25 @@ def test_the_11th_is_this_month_but_still_not_mid_month(h, pharmachem):
         "distributor_id": pharmachem["id"], "as_of": "2026-10-11",
         "files": [f["name"] for f in r["files"] if f["suggested"]]})
     assert (done["month"], done["mid_month"]) == ("October", "N")
+
+
+def test_npr_files_keep_their_rates_in_mapping_master(batch):
+    """Pharmachem's files are NPR: MAPPING_MASTER's RATE is the row's rate to 2
+    places, times 1, and SALES_VALUE the quantity times it."""
+    from sqlalchemy import select
+    from app import models_master as X
+    done, rows = batch
+    assert (done["file_currency"], done["npr_rate"]) == ("NPR", 1.0)
+    db = Testing()
+    try:
+        T = X.SalesMapping
+        mapped = db.execute(select(T).where(T.dist_id == 18671704, T.month == done["month"],
+                                            T.year == done["year"])).scalars().all()
+    finally:
+        db.close()
+    assert len(mapped) == done["rows"]
+    want = sorted(round(float(r["rate"]), 2) for r in rows)
+    assert sorted(m.rate for m in mapped) == want
+    for m in mapped:
+        q = m.return_quantity if m.return_quantity else m.sales_qty
+        assert abs(m.sales_value - round(q * m.rate, 2)) < 0.006

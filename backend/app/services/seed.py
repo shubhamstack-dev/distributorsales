@@ -174,16 +174,23 @@ def ensure_master_ids(db: Session) -> list[str]:
 
 # DIST_ID in MAPPING_MASTER: each distributor's number in the old system.
 DIST_IDS = {"PHARMACHEM": 18671704, "YETICHEM": 16212104, "GUNJESHWARI": 12664157}
+# The currency their files are in: Yetichem bills in INR, the others in NPR.
+FILE_CURRENCY = {"YETICHEM": "INR", "PHARMACHEM": "NPR", "GUNJESHWARI": "NPR"}
 
 
 def ensure_dist_ids(db: Session) -> list[str]:
-    """Fill a distributor's DIST_ID where it is empty; one set by hand is kept."""
+    """Fill a distributor's DIST_ID and file currency where empty; one set by hand is kept."""
     done = []
     for d in db.execute(select(M.Distributor).where(M.Distributor.dist_id.is_(None))).scalars():
         v = DIST_IDS.get((d.name or "").strip().upper())
         if v:
             d.dist_id = v
             done.append(f"{d.name} given DIST_ID {v}")
+    for d in db.execute(select(M.Distributor).where(M.Distributor.file_currency.is_(None))).scalars():
+        v = FILE_CURRENCY.get((d.name or "").strip().upper())
+        if v:
+            d.file_currency = v
+            done.append(f"{d.name}'s files read as {v}")
     db.commit()
     return done
 

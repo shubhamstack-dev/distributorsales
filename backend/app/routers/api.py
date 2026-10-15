@@ -18,6 +18,7 @@ from ..services import excel, name_check, names as namesvc, parse, triggers
 from ..services.auth import issue_token, password_ok
 from ..services.rules import period
 from ..services.seed import SELECT_ANY
+from .masters import rate_on
 
 
 def _any_file(d) -> bool:
@@ -320,6 +321,16 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     if name_check.blocking(problems):
         db.rollback()
         raise HTTPException(409, {"message": name_check.message(problems, d.name), **problems})
+    # MAPPING_MASTER keeps NPR: the file's currency to NPR on the day, or nothing goes in
+    currency = (d.file_currency or "NPR").upper()
+    if currency == "NPR":
+        npr_rate = 1.0
+    else:
+        try:
+            npr_rate = rate_on(db, currency, "NPR", as_of)["rate"]
+        except HTTPException as e:
+            raise HTTPException(409, f"Nothing was converted: {d.name}'s files are in {currency} and "
+                                     f"MAPPING_MASTER keeps NPR, but {e.detail} Add it on Currency rates.")
     if not triggers.READY["ok"]:
         raise HTTPException(500, "The sales_row triggers to MAPPING_MASTER are missing, so nothing "
                                  f"was converted: {triggers.READY['error']}")
@@ -347,7 +358,7 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
                     as_of=as_of, month_name=p["month"], year=p["year"],
                     mid_month=p["mid_month"], cutoff_day=cutoff,
                     mid_cutoff_day=mid_cutoff if mid_cutoff != cutoff else None,
-                    invoice_mode=invoice_mode,
+                    invoice_mode=invoice_mode, npr_rate=npr_rate,
                     created_by=(body.get("who") or "user")[:120], created_at_utc=_now(),
                     notes=("The month stepped back past January; Year is the current year as "
                            "the rule says." if p["wrapped"] else None))
@@ -386,6 +397,9 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     mapped.append(f"{seq} rows into " + " and ".join(
         f"{t}" + (f" (replacing {n} earlier rows of {d.name} for {p['month']} {p['year']})" if n else "")
         for t, n in replaced.items()) + ".")
+    if currency != "NPR":
+        mapped.append(f"The files are in {currency}; MAPPING_MASTER's rates are NPR at "
+                      f"{npr_rate:g} {currency}→NPR (rounded to 2 places).")
     alike = problems["matched_by_likeness"]
     if alike:
         mapped.append("Matched by likeness, worth a glance: " + "; ".join(
@@ -401,6 +415,7 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
             "month": p["month"], "year": p["year"], "mid_month": p["mid_month"],
             "wrapped": p["wrapped"], "mapping_tables": list(replaced),
             "mapping_replaced": replaced, "matched_by_likeness": alike,
+            "file_currency": currency, "npr_rate": npr_rate,
             "unmatched_customers": sorted(map_customer.missed),
             "unmatched_products": sorted(map_product.missed)}
 
