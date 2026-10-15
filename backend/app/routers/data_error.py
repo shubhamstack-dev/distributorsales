@@ -15,8 +15,9 @@ file_type: invoice -> MAPPING_MASTER, mid -> MAPPING_MASTER_MID.
 * Incomplete in Main: rows without a product, customer or HQ.
 * Duplicate Records: rows repeating another's invoice, customer, product,
   quantities and rate; the repeats are counted, not the first of each.
-* Sum of Amount in Main: SALES_VALUE summed, in the distributor's currency and
-  in INR at the Currency rates in force on the conversion's date.
+* Sum of Amount in Main (NPR): SALES_VALUE summed as the file gives it. The
+  files' amounts and rates are NPR and are kept so; no exchange rate is applied.
+  (The old screen labels this sum INR; it is the same NPR figure.)
 """
 from __future__ import annotations
 
@@ -26,7 +27,6 @@ from sqlalchemy.orm import Session
 
 from .. import models as M, models_master as X
 from ..database import get_db
-from .masters import rate_on
 
 router = APIRouter(prefix="/api")
 
@@ -57,10 +57,10 @@ def data_error(distributor_id: int, file_type: str = "invoice", db: Session = De
     out = {"distributor": d.name, "dist_id": d.dist_id, "table": T.__tablename__,
            "batch_id": None, "month": None, "year": None, "mid_month": None, "as_of": None,
            "temp": 0, "main": 0, "not_inserted": 0, "incomplete": 0, "duplicates": 0,
-           "amount": 0.0, "currency": None, "amount_inr": None, "rate_note": None,
+           "amount": 0.0, "note": None,
            "duplicate_rows": [], "incomplete_rows": []}
     if b is None:
-        out["rate_note"] = f"{d.name} has no conversion that writes {T.__tablename__} yet."
+        out["note"] = f"{d.name} has no conversion that writes {T.__tablename__} yet."
         return out
     out.update(batch_id=b.id, month=b.month_name, year=b.year, mid_month=b.mid_month,
                as_of=b.as_of.isoformat())
@@ -87,19 +87,7 @@ def data_error(distributor_id: int, file_type: str = "invoice", db: Session = De
             rows += [_row(r) for r in db.execute(select(T).where(*mine, *cond).order_by(T.id)).scalars()]
         out["duplicate_rows"] = rows[:100]
 
-    amount = float(db.execute(select(func.coalesce(func.sum(T.sales_value), 0)).where(*mine)).scalar())
-    out["amount"] = round(amount, 2)
-    country = db.get(X.Country, d.country_id) if d.country_id else None
-    cur = country.currency_code if country else None
-    out["currency"] = cur
-    if cur:
-        try:
-            r = rate_on(db, cur, "INR", b.as_of)
-            out["amount_inr"] = round(amount * r["rate"], 2)
-            out["rate_note"] = (f"{cur} to INR at {r['rate']} (in force from {r['effective_from']})"
-                                if r["via"] != "same" else None)
-        except HTTPException as e:
-            out["rate_note"] = f"{e.detail} Add it on Currency rates to see the amount in INR."
-    else:
-        out["rate_note"] = f"{d.name} has no country, so its currency is not known: set it on Distributor/Vendor."
+    # The amounts as the distributor's file gives them (NPR), summed; no rate applied.
+    out["amount"] = round(float(db.execute(
+        select(func.coalesce(func.sum(T.sales_value), 0)).where(*mine)).scalar()), 2)
     return out

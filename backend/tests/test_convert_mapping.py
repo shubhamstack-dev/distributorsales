@@ -172,7 +172,7 @@ def test_data_error_compares_temp_with_main(h, yeti):
     assert (r["month"], r["year"], r["table"]) == ("October", 2026, "MAPPING_MASTER")
     assert (r["temp"], r["main"], r["not_inserted"], r["incomplete"], r["duplicates"]) == (3, 3, 0, 0, 0)
     assert r["amount"] == 2500                                   # 4000 - 2000 + 500
-    assert (r["currency"], r["amount_inr"]) == ("NPR", 1562.5)    # at the seeded 1.6 INR/NPR
+    assert "amount_inr" not in r                                  # no exchange rate, as the old screen
     m = ok(c.get(f"/api/data-error?distributor_id={yeti['id']}&file_type=mid", headers=h))
     # the last mid-month conversion's rows are no longer in sales_row; MID still has them
     assert (m["table"], m["temp"], m["main"], m["not_inserted"]) == ("MAPPING_MASTER_MID", 0, 3, 0)

@@ -34,8 +34,7 @@ export default function DataError() {
     ['Incomplete in Main', n(r.incomplete), r.incomplete > 0],
     ['Month', r.month || '—'],
     ['Year', r.year || '—'],
-    [`Sum of Amount in Main${r.currency ? ` (${r.currency})` : ''}`, money(r.amount)],
-    ['Sum of Amount in Main (INR)', money(r.amount_inr)],
+    ['Sum of Amount in Main (NPR)', money(r.amount)],          // the files' own currency, unconverted
   ]
 
   return (
@@ -78,7 +77,7 @@ export default function DataError() {
                   for {r.as_of} (Mid Month {r.mid_month}); main is {r.table} for DIST_ID {r.dist_id ?? '—'}.
                   {r.temp === 0 && ' The sales rows table now holds a later conversion, so Temp is 0.'}</>
               : null}
-            {r.rate_note && <> {r.rate_note}</>}
+            {r.note && <> {r.note}</>}
           </p>
         </>}
       </section>

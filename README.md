@@ -118,9 +118,10 @@ for a distributor and File Type (Invoice: MAPPING_MASTER; Mid Month:
 MAPPING_MASTER_MID), its last conversion's rows in Temp (`sales_row`) against
 Main (the table, for its DIST_ID, month and year), Records Not Inserted,
 Duplicate Records (same invoice, customer, product, quantities and rate),
-rows Incomplete in Main (no product, customer or HQ), Month, Year, and the
-amount in the distributor's currency and in INR at Currency rates. The three
-distributors are set in Nepal (NPR) on start where no country is set.
+rows Incomplete in Main (no product, customer or HQ), Month, Year, and Sum of
+Amount in Main (NPR): the amounts as the files give them, summed, with no
+exchange rate (the files' amounts and rates are NPR, and MAPPING_MASTER keeps
+them so).
 
 **Then the rows go in:**
 
