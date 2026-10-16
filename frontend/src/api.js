@@ -134,6 +134,7 @@ export const api = {
   },
   budgetCarry: (body) => call('POST', '/api/budget/carry-forward', body),
   budgetZero: (body) => call('POST', '/api/budget/zero-rows', body),
+  budgetActuals: (year, month) => call('POST', '/api/budget/calculate-actuals', { year, month }),
   budgetReport: (params) => call('GET', `/api/budget/report?${qs(params)}`),
   budgetExport: (params) => save(`/api/budget/report/export?${qs(params)}`, `BUDGET_REPORT_${params.year}.xlsx`),
   dataError: (distributorId, fileType) =>

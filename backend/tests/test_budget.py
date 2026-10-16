@@ -210,3 +210,48 @@ def test_products_can_be_narrowed_by_group_and_brand(h, world):
     by_group = {o["id"] for o in ok(c.get(f"/api/masters/sku/options?product_group_id={gid}", headers=h))}
     by_brand = {o["id"] for o in ok(c.get("/api/masters/sku/options?product_brand_id=820", headers=h))}
     assert {166, 167, 168} <= by_group and by_brand == {166, 167, 168}
+
+
+def test_calculate_actuals_as_the_old_procedures(h, world):
+    def sale(T, **kw):
+        base = dict(month="September", year=2027, hq_id=801, product_group_id=805, product_brand_id=820,
+                    product_id=166, product_brand_category="X-OTHERS", rate=100.0, sales_qty=0, return_quantity=0)
+        return T(**{**base, **kw})
+    db = Testing()
+    try:
+        db.add_all([
+            sale(X.SalesMapping, sales_qty=10),                       # 10 sold at 100
+            sale(X.SalesMapping, return_quantity=-2),                 # 2 returned
+            sale(X.SalesMapping, sales_qty=7, return_quantity=None),  # an empty return: counts for nothing
+            sale(X.MidSalesMapping, sales_qty=5),
+            sale(X.SalesMapping, hq_id=6, product_group_id=4, sales_qty=10),       # group 4 in HQ 6: halved
+            sale(X.SalesMapping, product_id=999, sales_qty=1),        # sold, but no budget row
+            X.Budget(s_no=500, target_year=2027, employee_id=29587, hq_id=6, product_group_id=4,
+                     product_brand_id=820, product_id=166, product_brand_category="X-OTHERS",
+                     product_group="VACCINE"),
+            X.Budget(s_no=501, target_year=2027, employee_id=29587, hq_id=801, product_group_id=805,
+                     product_brand_id=820, product_id=166, product_brand_category=None),
+        ])
+        db.commit()
+    finally:
+        db.close()
+    r = ok(c.post("/api/budget/calculate-actuals", headers=h, json={"year": 2027, "month": "september"}))
+    assert (r["month"], r["sales_without_budget_row"], r["rows_with_an_empty_key"]) == ("September", 1, 2)
+    db = Testing()
+    try:
+        b = {(x.hq_id, x.product_group_id, x.product_brand_category): x
+             for x in db.query(X.Budget).filter_by(target_year=2027, product_id=166, employee_id=29587)}
+        brt = b[(801, 805, "X-OTHERS")]
+        assert round(brt.september_actual, 6) == 0.008                # (10 - 2) x 100 / 1 lakh
+        assert (brt.september_actual_units, brt.september_return) == (8, -125)   # -200 NPR / 1.6
+        assert (round(brt.september_mid_actual, 6), brt.september_mid_actual_units) == (0.005, 5)
+        ktm = b[(802, 805, "X-OTHERS")]
+        assert (ktm.september_actual, ktm.september_actual_units, ktm.september_return) == (0, 0, None)
+        g4 = b[(6, 4, "X-OTHERS")]
+        assert (round(g4.september_actual, 6), g4.september_actual_units) == (0.005, 10)   # value halved
+        assert g4.product_group == "VACCINE-NEURO"
+        assert b[(801, 805, None)].september_actual == 0              # no category: matches nothing
+    finally:
+        db.close()
+    assert c.post("/api/budget/calculate-actuals", headers=h,
+                  json={"year": 2027, "month": "Smarch"}).status_code == 422

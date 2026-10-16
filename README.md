@@ -390,6 +390,18 @@ old report left them. BUDGET_MASTER's values are NPR; the report gives them in
 INR (divided by the INR/NPR Currency rate in force), or NPR when chosen. In NPR
 it matches the old report to the paisa.
 
+**Calculate Actuals** (Budgeting menu, `POST /api/budget/calculate-actuals`), as
+the old SP_CALCULATE_ACTUALS_NEW and SP_CALCULATE_RETURN_VALUE_NEW: for a month
+and year, every budget row of the year gets <M>_ACTUAL = SUM(RATE x (SALES_QTY +
+RETURN_QUANTITY)) / 1 lakh and <M>_ACTUAL_UNITS from MAPPING_MASTER, the MID pair
+from MAPPING_MASTER_MID, and <M>_RETURN = SUM(RETURN_QUANTITY x RATE) / the
+INR/NPR rate, matched on HQ, group, brand, product and category (every employee
+of the HQ gets them); group 4 in HQ 6 is halved; then METABOLICS / VACCINE
+become METABOLICS-NEW / VACCINE-NEURO and an empty ACTUAL is 0. One grouped
+query a month, each row updated by its ID (no duplicate rows as the old
+procedure made for an empty category). Checked against the old system's own
+June and August 2026 actuals: all 2,675 rows the same.
+
 **Zero Budget** (Budgeting menu, `POST /api/budget/carry-forward` and
 `/api/budget/zero-rows`) makes rows with 0 units and 0 value: from another year
 (every employee / HQ / product budgeted in one year and missing from another,

@@ -5,6 +5,7 @@
     POST /api/budget/upload                 year, file, dry_run: check, then post
     POST /api/budget/carry-forward          0-budget rows: last year's rows missing this year
     POST /api/budget/zero-rows              0-budget rows: year, employee, SKUs, HQs
+    POST /api/budget/calculate-actuals      a month's actuals from MAPPING_MASTER(_MID)
     GET  /api/budget/report                 year + optional filters, currency INR | NPR
     GET  /api/budget/report/export          the same, as an Excel workbook
 
@@ -36,7 +37,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request
 from fastapi.responses import Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from .. import models_master as X
@@ -347,6 +348,106 @@ def zero_rows(body: dict = Body(...), db: Session = Depends(get_db)):
             raise HTTPException(422, "Choose the HQ: the employee has none on Employee Terr-PG.")
     keys = {(emp, h, p) for h in hqs for p in pids}
     return {**_zero_rows(db, year, keys, bool(body.get("dry_run"))), "hq_ids": hqs}
+
+
+# ------------------------------------------------------------ calculate actuals
+# The old Calculate Actuals (SP_CALCULATE_ACTUALS_NEW, SP_CALCULATE_RETURN_VALUE_NEW
+# and AbbottCalculateActualsWithMultiplyAndUpdateSQL), for one month of a year,
+# over every budget row of the year. A row's sales are MAPPING_MASTER's rows of
+# the month with its HQ_ID, PRODUCT_GROUP_ID, PRODUCT_BRAND_ID, PRODUCT_ID and
+# PRODUCT_BRAND_CATEGORY (not its employee: each employee of the HQ gets them).
+#   <M>_ACTUAL                SUM(RATE x (SALES_QTY + RETURN_QUANTITY)) / 100000 (lakh, NPR)
+#   <M>_ACTUAL_UNITS          SUM(SALES_QTY + RETURN_QUANTITY)
+#   <M>_MID_ACTUAL(_UNITS)    the same from MAPPING_MASTER_MID
+#   <M>_RETURN                SUM(RETURN_QUANTITY x RATE) / the INR/NPR rate (INR); empty
+#                             when the month has no such rows
+# Values (not units) are halved for product group 4 in HQ 6. As in SQL, a row
+# whose RATE or RETURN_QUANTITY is empty counts for nothing. Then the year's
+# group names METABOLICS / VACCINE become METABOLICS-NEW / VACCINE-NEURO, and an
+# empty <M>_ACTUAL is 0. Every row is updated by its own ID, so a row with no
+# PRODUCT_BRAND_CATEGORY is never doubled (the old procedure inserted another).
+KEY = ("hq_id", "product_group_id", "product_brand_id", "product_id", "product_brand_category")
+HALVED = (4, 6)                      # (PRODUCT_GROUP_ID, HQ_ID)
+RENAMED = {"METABOLICS": "METABOLICS-NEW", "VACCINE": "VACCINE-NEURO"}
+
+
+def _sums(db: Session, T, month: str, year: int, returns: bool) -> dict:
+    cols = [getattr(T, k) for k in KEY]
+    q = T.sales_qty + T.return_quantity
+    parts = [func.sum(T.rate * q), func.sum(q), func.count()]
+    if returns:
+        parts.append(func.sum(T.return_quantity * T.rate))
+    out = {}
+    for r in db.execute(select(*cols, *parts).where(T.month == month, T.year == year).group_by(*cols)):
+        out[tuple(r[:5])] = r[5:]
+    return out
+
+
+@router.post("/budget/calculate-actuals")
+def calculate_actuals(body: dict = Body(...), db: Session = Depends(get_db)):
+    year = _year(db, body.get("year"), "year")
+    month = str(body.get("month") or "").strip().title()
+    if month.upper() not in MONTHS:
+        raise HTTPException(422, "Choose the month.")
+    m = month.lower()
+    try:
+        inr = float(rate_on(db, "INR", "NPR", date(year, MONTHS.index(month.upper()) + 1, 1))["rate"])
+    except HTTPException as e:
+        raise HTTPException(422, f"{e.detail} The returns are worked out in INR: add the rate on Currency rates.")
+    main = _sums(db, X.SalesMapping, month, year, returns=True)
+    mid = _sums(db, X.MidSalesMapping, month, year, returns=False)
+    Bm = X.Budget
+    rows = db.execute(select(Bm).where(Bm.target_year == year)).scalars().all()
+    used, with_sales, empty_key = set(), 0, 0
+    tot = {"actual": 0.0, "units": 0.0, "mid_actual": 0.0, "mid_units": 0.0, "returns": 0.0}
+    for r in rows:
+        key = tuple(getattr(r, k) for k in KEY)
+        half = 2.0 if (r.product_group_id, r.hq_id) == HALVED else 1.0
+        if any(v is None for v in key):      # as SQL: an empty column matches nothing
+            empty_key += 1
+            a = b = None
+        else:
+            a, b = main.get(key), mid.get(key)
+        if a:
+            used.add(key)
+        if b:
+            used.add(key)
+        actual = (float(a[0]) / 100000 / half) if a and a[0] is not None else 0.0
+        units = float(a[1]) if a and a[1] is not None else 0.0
+        mid_actual = (float(b[0]) / 100000 / half) if b and b[0] is not None else 0.0
+        mid_units = float(b[1]) if b and b[1] is not None else 0.0
+        ret = (float(a[3]) / inr / half) if a and a[3] is not None else None
+        setattr(r, f"{m}_actual", actual)
+        setattr(r, f"{m}_actual_units", units)
+        setattr(r, f"{m}_mid_actual", mid_actual)
+        setattr(r, f"{m}_mid_actual_units", mid_units)
+        setattr(r, f"{m}_return", ret)
+        if actual or units or mid_actual or mid_units:
+            with_sales += 1
+        tot["actual"] += actual
+        tot["units"] += units
+        tot["mid_actual"] += mid_actual
+        tot["mid_units"] += mid_units
+        tot["returns"] += ret or 0.0
+        if r.product_group in RENAMED:
+            r.product_group = RENAMED[r.product_group]
+    db.flush()
+    # the old procedure's last step, for the rows the loop did not reach
+    for old, new in RENAMED.items():
+        db.execute(update(Bm).where(Bm.target_year == year, Bm.product_group == old).values(product_group=new))
+    db.execute(update(Bm).where(Bm.target_year == year, getattr(Bm, f"{m}_actual").is_(None))
+               .values({getattr(Bm, f"{m}_actual"): 0}))
+    db.commit()
+    unbudgeted = [k for k in set(main) | set(mid) if k not in used and None not in k]
+    return {"year": year, "month": month, "rows": len(rows), "rows_with_sales": with_sales,
+            "inr_rate": inr, **{k: round(v, 4) for k, v in tot.items()},
+            "sales_without_budget_row": len(unbudgeted), "rows_with_an_empty_key": empty_key,
+            "message": (f"{month} {year}: actuals worked out on {len(rows)} budget rows, "
+                        f"{with_sales} of them with sales."
+                        + (f" {len(unbudgeted)} HQ / product sales of the month have no budget row: "
+                           f"give them one on Zero Budget and calculate again." if unbudgeted else "")
+                        + (f" {empty_key} budget rows have an empty HQ, group, brand, product or "
+                           f"category ID and get no actuals." if empty_key else ""))}
 
 
 # ------------------------------------------------------------------- report

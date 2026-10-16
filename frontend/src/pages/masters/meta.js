@@ -13,6 +13,7 @@ export const MENUS = [
   { label: 'Budgeting', groups: ['Budgeting'],
     links: [{ to: '/masters/budget-upload', title: 'Budget Upload' },
             { to: '/masters/budget-zero', title: 'Zero Budget' },
+            { to: '/masters/budget-actuals', title: 'Calculate Actuals' },
             { to: '/masters/budget-report', title: 'Budget Report' }] },
   { label: 'Sales', groups: ['Sales'], links: [{ to: '/masters/data-error', title: 'Data Error' }] },
 ]

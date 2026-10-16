@@ -332,3 +332,74 @@ export function BudgetZero() {
   )
 }
 
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December']
+
+/** Calculate Actuals, as the old screen: a month and a year; every budget row of
+ *  the year gets that month's actuals from MAPPING_MASTER and MAPPING_MASTER_MID. */
+export function BudgetActuals() {
+  const [err, setErr] = useState('')
+  const years = useYears(setErr)
+  const [month, setMonth] = useState('')
+  const [year, setYear] = useState('')
+  const [r, setR] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  async function calc() {
+    if (!month || !year) { setErr('Select the month and the year.'); return }
+    if (!window.confirm(`Work out ${month} ${year}'s actuals on every budget row of ${year}?\n\n`
+      + `The month's ACTUAL, ACTUAL_UNITS, MID_ACTUAL, MID_ACTUAL_UNITS and RETURN are replaced.`)) return
+    setErr(''); setBusy(true); setR(null)
+    try { setR(await api.budgetActuals(year, month)) } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="page">
+      <div className="head"><div>
+        <p className="crumb">Budgeting</p>
+        <h1>Calculate Actuals</h1>
+        <p className="lead">For the month chosen, every budget row of the year gets its sales from
+          MAPPING_MASTER (and the mid-month sales from MAPPING_MASTER_MID): by HQ, product group, brand,
+          product and category, as the old procedures worked them out.</p>
+      </div></div>
+
+      <section className="panel">
+        <div className="grid2 de-form">
+          <label><span>Month<b aria-hidden="true">*</b></span>
+            <select value={month} onChange={(e) => setMonth(e.target.value)}>
+              <option value="">-- Select Month --</option>
+              {MONTH_NAMES.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select></label>
+          <label><span>Year<b aria-hidden="true">*</b></span>
+            <select value={year} onChange={(e) => setYear(e.target.value)}>
+              <option value="">-- Select Year --</option>
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select></label>
+        </div>
+        <div className="actions">
+          <button className="btn primary" disabled={busy} onClick={calc}>{busy ? 'Calculating…' : 'Calculate'}</button>
+          <button className="btn" onClick={() => { setMonth(''); setYear(''); setR(null); setErr('') }}>Clear</button>
+        </div>
+        {err && <div className="alert bad">{err}</div>}
+        {r && <>
+          <div className="alert ok">{r.message}</div>
+          <div className="de-boxes">
+            <div className="de-box"><span>Budget rows</span><b>{n(r.rows, 0)}</b></div>
+            <div className="de-box"><span>Rows with sales</span><b>{n(r.rows_with_sales, 0)}</b></div>
+            <div className="de-box"><span>Actual (lakh, NPR)</span><b>{n(r.actual, 4)}</b></div>
+            <div className="de-box"><span>Actual units</span><b>{n(r.units)}</b></div>
+            <div className="de-box"><span>Mid actual (lakh, NPR)</span><b>{n(r.mid_actual, 4)}</b></div>
+            <div className="de-box"><span>Mid actual units</span><b>{n(r.mid_units)}</b></div>
+            <div className="de-box"><span>Returns (INR)</span><b>{n(r.returns)}</b></div>
+            <div className={`de-box${r.sales_without_budget_row ? ' warn' : ''}`}><span>Sales with no budget row</span>
+              <b>{n(r.sales_without_budget_row, 0)}</b></div>
+          </div>
+          <p className="fine">The actuals add each employee's row of an HQ: the same sales stand on every
+            employee budgeted for that HQ and product, as in the old system.</p>
+        </>}
+      </section>
+    </div>
+  )
+}
+
