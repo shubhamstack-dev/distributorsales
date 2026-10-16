@@ -122,6 +122,20 @@ export const api = {
   assign: (kind, action, body) => call('POST', `/api/assign/${kind}/${action}`, body),
   // a file's spelling matched to a master by hand, on Convert's panel
   nameMatch: (kind, name, masterId) => call('POST', '/api/name-match', { kind, name, master_id: masterId }),
+  // Budget Upload (check, then post) and Budget Report
+  budgetYears: () => call('GET', '/api/budget/years'),
+  budgetTemplate: () => save('/api/budget/template', 'AbbottBudgetFormet.xlsx'),
+  budgetUpload: (year, file, dryRun) => {
+    const fd = new FormData()
+    fd.append('year', year)
+    fd.append('dry_run', dryRun ? 'true' : 'false')
+    fd.append('file', file)
+    return upload('/api/budget/upload', fd)
+  },
+  budgetCarry: (body) => call('POST', '/api/budget/carry-forward', body),
+  budgetZero: (body) => call('POST', '/api/budget/zero-rows', body),
+  budgetReport: (params) => call('GET', `/api/budget/report?${qs(params)}`),
+  budgetExport: (params) => save(`/api/budget/report/export?${qs(params)}`, `BUDGET_REPORT_${params.year}.xlsx`),
   dataError: (distributorId, fileType) =>
     call('GET', `/api/data-error?${qs({ distributor_id: distributorId, file_type: fileType })}`),
   terrPg: (kind, params) => call('GET', `/api/terr-pg/${kind}?${qs(params)}`),

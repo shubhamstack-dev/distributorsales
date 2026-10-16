@@ -7,8 +7,8 @@ const plain = (label) => label.split(' — ').pop()
 
 /** Several rows of a master picked at once: a filterable list of checkboxes,
  *  for the old forms' multi-select boxes (Headquarter, Product Group). */
-export function MultiPick({ slug, keyBy, value, onChange, label }) {
-  const opts = useOptions(slug, keyBy ? { key: keyBy } : {})
+export function MultiPick({ slug, keyBy, value, onChange, label, params = {} }) {
+  const opts = useOptions(slug, { ...params, ...(keyBy ? { key: keyBy } : {}) })
   const [filter, setFilter] = useState('')
   const shown = useMemo(() => {
     const f = filter.trim().toLowerCase()

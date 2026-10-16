@@ -423,3 +423,11 @@ td.row-actions>div{display:inline-flex;gap:6px}
 .choose-rows .other .refsel{flex:1}
 .choose-rows .files{display:block;margin-top:2px}
 .choose-rows tr.done td{opacity:.75}
+
+/* ------------------------------------------------- Budget Upload / Report */
+.file-pick{display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid var(--line-2);
+  border-radius:12px;background:rgba(2,6,13,.35)}
+.br-form{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.budget-grid td,.budget-grid th{white-space:nowrap}
+.budget-grid td:nth-child(4),.budget-grid td:nth-child(12){white-space:normal;min-width:170px}
+.budget-grid tfoot td{border-top:1px solid var(--line-2);background:rgba(255,255,255,.03)}

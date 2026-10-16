@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from . import config, models as M, models_master  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
-from .routers import api, assign_ops, data_error, master_upload, masters, terr_pg
+from .routers import api, assign_ops, budget, data_error, master_upload, masters, terr_pg
 from .services import migrate, seed, triggers
 from .services.auth import read_token
 
@@ -47,6 +47,7 @@ app.include_router(masters.router)
 app.include_router(terr_pg.router)            # Customer / Employee Terr-PG pages
 app.include_router(assign_ops.router)         # their create / delete / assign all / clean
 app.include_router(data_error.router)         # Data Error: temp vs main after a conversion
+app.include_router(budget.router)             # Budget Upload and Budget Report
 
 Base.metadata.create_all(engine)
 try:

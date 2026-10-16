@@ -10,7 +10,10 @@ export const MENUS = [
   { label: 'Assignment', groups: ['Assignment'], also: ['Assignment tables'],
     links: [{ to: '/masters/terr-pg/customer', title: 'Customer Terr-PG' },
             { to: '/masters/terr-pg/employee', title: 'Employee Terr-PG' }] },
-  { label: 'Budgeting', groups: ['Budgeting'] },
+  { label: 'Budgeting', groups: ['Budgeting'],
+    links: [{ to: '/masters/budget-upload', title: 'Budget Upload' },
+            { to: '/masters/budget-zero', title: 'Zero Budget' },
+            { to: '/masters/budget-report', title: 'Budget Report' }] },
   { label: 'Sales', groups: ['Sales'], links: [{ to: '/masters/data-error', title: 'Data Error' }] },
 ]
 export const GROUPS = MENUS.flatMap((m) => m.groups)

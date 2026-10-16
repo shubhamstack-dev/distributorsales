@@ -3,6 +3,7 @@ import MasterPage from './MasterPage.jsx'
 import MasterUpload from './MasterUpload.jsx'
 import TerrPgPage from './TerrPgPage.jsx'
 import DataError from './DataError.jsx'
+import { BudgetReport, BudgetUpload, BudgetZero } from './Budget.jsx'
 import { useMasterMeta } from './meta.js'
 
 /** Every master screen. They are chosen from the Masters menu in the top bar,
@@ -21,6 +22,9 @@ export default function Masters() {
       <Route path="upload" element={<MasterUpload meta={meta} />} />
       <Route path="terr-pg/:kind" element={<TerrPgPage meta={meta} />} />
       <Route path="data-error" element={<DataError />} />
+      <Route path="budget-upload" element={<BudgetUpload />} />
+      <Route path="budget-report" element={<BudgetReport />} />
+      <Route path="budget-zero" element={<BudgetZero />} />
       {meta.map((m) => (
         <Route key={m.slug} path={m.slug} element={<MasterPage key={m.slug} spec={m} />} />
       ))}

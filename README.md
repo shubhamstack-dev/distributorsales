@@ -371,6 +371,34 @@ and the screen asks before it writes, saying how many rows go in or out.
 Nothing is ever added twice. 1,500 customers × every HQ and product (about
 400,000 rows) assigns in a few seconds.
 
+**Budget Upload and Budget Report** (Budgeting menu, `routers/budget.py`), as
+the old screens. Upload: a year (YEAR_MASTER) and AbbottBudgetFormet.xlsx
+(EMPLOYEE_ID, PRODUCT_GROUP, HQ_NAME, PRODUCT_BRAND, PRODUCT_ID, PRODUCT_NAME,
+JANUARY_UNITS … DECEMBER_UNITS; "Download the format" gives it). **Check** names
+every row that cannot go in (unknown employee, SKU or HQ, a SKU with no NRV,
+units that are not numbers, a row twice) and saves nothing; **Upload** posts
+only a clean file, as the old procedure: each month's value = units x the SKU's
+NRV, the SKU's brand and group (IDs and names), HQ_ID, and the brand's REPORTING
+as PRODUCT_BRAND_CATEGORY. A row is year + employee + HQ + SKU: sent again it is
+updated, its actuals kept; S_NO is the SKU's budget line in the year. Report:
+a year and any of employee, HQ, product group, brand and product; Go, Clear,
+Excel. Laid out as the old report (TARGET_YEAR, EMPLOYEE_ID, EMPLOYEE_NAME,
+HQ_ID, HQ_NAME, PRODUCT_GROUP_ID, PRODUCT_GROUP, PRODUCT_BRAND_ID, PRODUCT_BRAND,
+PRODUCT_ID, PRODUCT_NAME, the twelve <MONTH>_UNITS, the twelve <MONTH> values,
+and a Total row), with rows whose SKU is not in the SKU master left out as the
+old report left them. BUDGET_MASTER's values are NPR; the report gives them in
+INR (divided by the INR/NPR Currency rate in force), or NPR when chosen. In NPR
+it matches the old report to the paisa.
+
+**Zero Budget** (Budgeting menu, `POST /api/budget/carry-forward` and
+`/api/budget/zero-rows`) makes rows with 0 units and 0 value: from another year
+(every employee / HQ / product budgeted in one year and missing from another,
+for everyone or one employee), or for a new product (year, employee, products,
+and HQs — none chosen means the HQs the employee covers on Employee Terr-PG).
+Each is checked first and asked; a row already there is never changed; brand,
+group, HQ name and category come from the masters, S_NO is the product's line in
+the year.
+
 **Lists read like the old screens**: S.No, the row's Id and name, its parents by
 name (a territory's Zone and HQ; a SKU's Product Group, Brand, and — through the
 brand — Team and Reporting; an employee's Role, Designation and Reporting

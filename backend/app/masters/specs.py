@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from .. import models as M
 from .. import models_master as X
@@ -160,7 +160,12 @@ def _group_master_id(v):
 
 
 def _sku_by_group(sel, v):
-    return sel.where(X.ProductMaster.product_group_id == _group_master_id(v))
+    """SKUs in the group: by their own group, or, where they have none, their brand's."""
+    g = _group_master_id(v)
+    P, B = X.ProductMaster, X.ProductMasterBrand
+    return sel.where(or_(P.product_group_id == g,
+                         and_(P.product_group_id.is_(None),
+                              P.product_brand_id.in_(select(B.id).where(B.product_group_id == g)))))
 
 
 def _brand_by_group(sel, v):
