@@ -5,7 +5,7 @@ import pathlib
 from sqlalchemy import create_engine, inspect, text
 
 from app.database import Base
-from app import models, models_master        # noqa: F401  (the tables)
+from app import models, models_master, models_report   # noqa: F401  (the tables)
 from app.services import migrate
 
 

@@ -23,7 +23,9 @@ class ReportMailSettings(Base):
     # after a conversion
     auto_on_convert: Mapped[int] = mapped_column("AutoOnConvert", Integer, nullable=False, default=1)
     calculate_first: Mapped[int] = mapped_column("CalculateFirst", Integer, nullable=False, default=1)
-    send_mail: Mapped[int] = mapped_column("SendMail", Integer, nullable=False, default=1)
+    send_mail: Mapped[int] = mapped_column("SendMail", Integer, nullable=False, default=1)   # no longer read
+    # email after every conversion: off, so one mail goes by Send Mail once every distributor is in
+    mail_on_convert: Mapped[int] = mapped_column("MailOnConvert", Integer, nullable=False, default=0)
     download_after: Mapped[int] = mapped_column("DownloadAfter", Integer, nullable=False, default=1)
     # the email
     recipients: Mapped[str | None] = mapped_column("Recipients", Text)

@@ -30,6 +30,8 @@ ADDED = {
     # one key per table: a second "batch" would silently replace the first
     "batch": [("MidCutoffDay", "INT NULL"), ("NprRate", "DECIMAL(18,6) NULL")],
     "sales_row": [("CustomerId", "INT NULL"), ("ProductId", "INT NULL")],
+    # off for a database that had the first Analyzer Email: one mail by Send Mail instead
+    "report_mail_settings": [("MailOnConvert", "INT NOT NULL DEFAULT 0")],
     # the Master ID the Excel master tables point at
     **{t: [("LegacyId", "INT NULL")] for t in (
         "md_zone", "md_headquarter", "md_territory", "md_product_group",

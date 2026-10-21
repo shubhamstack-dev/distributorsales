@@ -581,23 +581,27 @@ query; the workbook is written with XlsxWriter. On 144,000 sales rows and four
 years: the old queries alone 6.5 s; the whole new report, workbook included,
 2.7 s. A month of the real size (about 1,100 sales rows) takes under a second.
 
-### Analyzer Email: after every conversion, or by hand
+### Send Mail and Analyzer Email
 
-**Reports › Analyzer Email** (`reports/analyzer_job.py`, `services/mailer.py`).
-When a zip is converted, a run starts by itself after the reply (Convert shows
-it, with a tick to skip it once):
+**After a conversion** (`reports/analyzer_job.py`) a run starts by itself
+after the reply (Convert shows it, with a tick to skip it once): the month's
+actuals are calculated, as Budgeting › Calculate Actuals, and the Nepal
+Analyzer is made and downloads in the browser. It is **not emailed**: one
+email a month goes once every distributor is converted. ("Email it after every
+conversion" on Analyzer Email, or "Email it now" on Convert, turns that on.)
 
-1. the month converted gets its actuals calculated, as Budgeting › Calculate Actuals;
-2. the Nepal Analyzer is made for that month, kept on the run;
-3. it downloads in the browser (the batch page shows the run, step by step);
-4. it is emailed, workbook attached, to the addresses set (181296shubham@gmail.com
-   to begin with), with the month's target, sale, % achieved, distributors and
-   divisions in the body.
+**Send Mail** — on each batch's page (its month chosen), on Nepal Analyzer
+(the page's month), and on Reports › Send Mail (any month and year; the latest
+conversion's to begin with). It shows each distributor as converted (✓, with
+its rows) or not (✗) for the month (`GET /api/reports/month-status`), and when
+the month was last mailed. **Send Mail** calculates the month's actuals (can
+be unticked), makes the workbook and emails it, attached, to the addresses
+set (181296shubham@gmail.com to begin with) with the month's target, sale,
+% achieved, distributors and divisions in the body. It asks first when a
+distributor is not converted yet, or the month was mailed already.
 
-**By hand:** Nepal Analyzer › *Calculate and email* (any month, any addresses,
-with or without calculating first); every run's workbook can be downloaded
-or sent again (to the same or other addresses) from the batch, Nepal Analyzer
-or Analyzer Email.
+Every run's workbook can be downloaded or sent again (to the same or other
+addresses) from the batch, Nepal Analyzer, Send Mail or Analyzer Email.
 
 Sending is SMTP, set on Analyzer Email (buttons fill in Microsoft 365, Google
 Workspace / Gmail, Zoho India):

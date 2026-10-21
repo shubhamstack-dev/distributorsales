@@ -50,9 +50,9 @@ export default function AnalyzerEmail() {
       <div className="head"><div>
         <p className="crumb">Reports</p>
         <h1>Analyzer Email</h1>
-        <p className="lead">After a zip is converted, the month's actuals are calculated, the Nepal Analyzer
-          is made and downloaded, and emailed with the workbook attached. It can also be sent by hand
-          from <Link to="/masters/nepal-analyzer">Nepal Analyzer</Link>.</p>
+        <p className="lead">After a zip is converted, the month's actuals are calculated and the Nepal Analyzer
+          is made and downloaded. Once every distributor is converted, <Link to="/masters/send-mail">Send Mail</Link>{' '}
+          emails it once, with the workbook attached, for any month and year.</p>
       </div></div>
 
       <div className="mail-grid">
@@ -69,8 +69,10 @@ export default function AnalyzerEmail() {
               <small>Convert shows this, and it can be unticked there for one conversion.</small></span></label>
           <label className="check"><input type="checkbox" checked={s.calculate_first} onChange={set('calculate_first')} disabled={!s.auto_on_convert} />
             <span>Calculate the month's actuals first <small>As Budgeting › Calculate Actuals.</small></span></label>
-          <label className="check"><input type="checkbox" checked={s.send_mail} onChange={set('send_mail')} disabled={!s.auto_on_convert} />
-            <span>Email it, with the workbook attached</span></label>
+          <label className="check"><input type="checkbox" checked={s.mail_on_convert} onChange={set('mail_on_convert')} disabled={!s.auto_on_convert} />
+            <span>Email it after every conversion
+              <small>Off: no email per distributor; once all are converted, <Link to="/masters/send-mail">Send Mail</Link> sends
+                the month once.</small></span></label>
           <label className="check"><input type="checkbox" checked={s.download_after} onChange={set('download_after')} disabled={!s.auto_on_convert} />
             <span>Download it in the browser too</span></label>
         </section>

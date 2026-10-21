@@ -3,7 +3,10 @@ Calculate Actuals does), the workbook made, kept on the job, and emailed with
 the workbook attached.
 
 A conversion starts one by itself when Analyzer Email says so (and Convert
-did not untick it); the Nepal Analyzer page starts one by hand. Runs go one at
+did not untick it): actuals and workbook, emailed only if "Email it after
+every conversion" is on (it is off: the one email of the month goes by Send
+Mail once every distributor is converted). Send Mail (batch page, Nepal
+Analyzer, Reports › Send Mail) starts one by hand for any month and year. Runs go one at
 a time (two conversions in a row would otherwise calculate the same month at
 once). The conversion is never held up or undone by its run: a run that fails
 says why on the batch and on Analyzer Email, and can be sent again.
@@ -30,7 +33,8 @@ LOCK = threading.Lock()
 def settings(db: Session) -> R.ReportMailSettings:
     s = db.get(R.ReportMailSettings, 1)
     if s is None:
-        s = R.ReportMailSettings(id=1, auto_on_convert=1, calculate_first=1, send_mail=1, download_after=1,
+        s = R.ReportMailSettings(id=1, auto_on_convert=1, calculate_first=1, send_mail=1, mail_on_convert=0,
+                                 download_after=1,
                                  recipients=R.DEFAULT_TO, subject=R.DEFAULT_SUBJECT, security="starttls",
                                  auth="password", from_name="Distributor Sales")
         db.add(s)
@@ -88,7 +92,7 @@ def after_convert(db: Session, batch, month: str, year: int, wanted: dict | None
             return None
         j = create(db, trigger="convert", month=month, year=year,
                    calculate=wanted.get("calculate", bool(s.calculate_first)),
-                   send=wanted.get("send", bool(s.send_mail)), batch=batch, who=who)
+                   send=wanted.get("send", bool(s.mail_on_convert)), batch=batch, who=who)
         db.commit()
         return j
     except Exception as e:                           # noqa: BLE001
@@ -259,6 +263,41 @@ def stop_unfinished(db: Session) -> int:
         n += 1
     db.commit()
     return n
+
+
+def month_status(db: Session, month: str | None, year: int | None) -> dict:
+    """For Send Mail: each active distributor's conversion of the month (its
+    rows in MAPPING_MASTER and MAPPING_MASTER_MID, its latest batch), and the
+    month's last email. With no month given, the month of the latest batch."""
+    from sqlalchemy import func
+    from .. import models as M, models_master as X
+    if not month or not year:
+        last = db.execute(select(M.Batch).order_by(M.Batch.id.desc()).limit(1)).scalars().first()
+        if last is None:
+            return {"month": None, "year": None, "distributors": [], "all_converted": False, "last_mail": None}
+        month, year = last.month_name, last.year
+    month = month.strip().title()
+    rows = {}
+    for T, k in ((X.SalesMapping, "rows"), (X.MidSalesMapping, "mid_rows")):
+        for name, n in db.execute(select(T.dist_name, func.count()).where(T.year == year, T.month == month)
+                                  .group_by(T.dist_name)):
+            rows.setdefault((name or "").strip().casefold(), {"rows": 0, "mid_rows": 0})[k] += n
+    out = []
+    for d in db.execute(select(M.Distributor).where(M.Distributor.active == 1).order_by(M.Distributor.name)).scalars():
+        b = db.execute(select(M.Batch).where(M.Batch.distributor_id == d.id, M.Batch.year == year,
+                                             func.lower(M.Batch.month_name) == month.lower())
+                       .order_by(M.Batch.id.desc()).limit(1)).scalars().first()
+        r = rows.get(d.name.strip().casefold(), {"rows": 0, "mid_rows": 0})
+        out.append({"id": d.id, "name": d.name, **r, "converted": r["rows"] > 0,
+                    "last_batch": {"id": b.id, "as_of": b.as_of.isoformat(), "mid_month": b.mid_month,
+                                   "rows": b.row_count} if b else None})
+    sent = db.execute(select(R.ReportJob).where(R.ReportJob.year == year, R.ReportJob.month == month,
+                                                R.ReportJob.mail_status == "sent")
+                      .order_by(R.ReportJob.id.desc()).limit(1)).scalars().first()
+    return {"month": month, "year": year, "distributors": out,
+            "all_converted": bool(out) and all(x["converted"] for x in out),
+            "last_mail": {"id": sent.id, "sent_at": sent.sent_at.isoformat(timespec="seconds"),
+                          "recipients": sent.recipients} if sent else None}
 
 
 def latest(db: Session, batch_id: int | None = None, limit: int = 30) -> list[R.ReportJob]:

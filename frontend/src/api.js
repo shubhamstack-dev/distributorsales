@@ -140,6 +140,7 @@ export const api = {
   nepalAnalyzer: (month, year) => save(`/api/reports/nepal-analyzer?${qs({ month, year })}`,
     `NepalAnalyzerReports_${month}${year}.xlsx`),
   mailSettings: () => call('GET', '/api/reports/mail-settings'),
+  monthStatus: (month, year) => call('GET', `/api/reports/month-status?${qs(month ? { month, year } : {})}`),
   saveMailSettings: (body) => call('PUT', '/api/reports/mail-settings', body),
   testMail: (to) => call('POST', '/api/reports/mail-settings/test', { to }),
   startAnalyzer: (body) => call('POST', '/api/reports/analyzer-jobs', body),

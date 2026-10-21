@@ -3,6 +3,7 @@
     GET  /api/reports/nepal-analyzer?month=&year=      the workbook, made now
     POST /api/reports/analyzer-jobs                    a run by hand: {month, year, calculate,
                                                        send, recipients?, cc?}; runs after the reply
+    GET  /api/reports/month-status?month=&year=        Send Mail: distributors converted for the month
     GET  /api/reports/analyzer-jobs?batch_id=&limit=   the latest runs
     GET  /api/reports/analyzer-jobs/{id}               one run (polled while it runs)
     GET  /api/reports/analyzer-jobs/{id}/file          its workbook
@@ -76,6 +77,15 @@ def start(background: BackgroundTasks, body: dict = Body(...), db: Session = Dep
     return AJ.out(j)
 
 
+@router.get("/month-status")
+def month_status(month: str = "", year: int | None = None, db: Session = Depends(get_db)):
+    """Send Mail: which distributors are converted for the month (the latest
+    batch's month when none is given), and its last email."""
+    if month:
+        month, year = _month_year(month, year)
+    return AJ.month_status(db, month or None, year)
+
+
 @router.get("/analyzer-jobs")
 def jobs(batch_id: int | None = None, limit: int = 30, db: Session = Depends(get_db)):
     return [AJ.out(j) for j in AJ.latest(db, batch_id, max(1, min(limit, 200)))]
@@ -126,10 +136,10 @@ def job_send(jid: int, background: BackgroundTasks, body: dict = Body(default={}
 
 
 # ------------------------------------------------------------------- settings
-FIELDS = ("auto_on_convert", "calculate_first", "send_mail", "download_after", "recipients", "cc", "subject",
+FIELDS = ("auto_on_convert", "calculate_first", "mail_on_convert", "download_after", "recipients", "cc", "subject",
           "smtp_host", "smtp_port", "security", "auth", "username", "from_address", "from_name",
           "tenant_id", "client_id")
-FLAGS = ("auto_on_convert", "calculate_first", "send_mail", "download_after")
+FLAGS = ("auto_on_convert", "calculate_first", "mail_on_convert", "download_after")
 
 
 def _settings_out(s: R.ReportMailSettings) -> dict:

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams, Link } from 'react-router-dom'
 import { api } from '../api.js'
 import { RunCard, useRun } from './reports/AnalyzerRun.jsx'
+import SendMailPanel from './reports/SendMail.jsx'
 
 const money = (n) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -53,6 +54,8 @@ export default function BatchDetail() {
       {b.notes && <div className="alert info">{b.notes}</div>}
       {run && <RunCard job={run} title={`Nepal Analyzer after this conversion`}
                        onChange={(j) => { setRun(j); setRunId(null); setTimeout(() => setRunId(j.id), 0) }} />}
+      <SendMailPanel key={b.id} initialMonth={b.month} initialYear={b.year}
+                     title={`Send Mail — when all distributors are converted`} />
       {b.rows_replaced && (
         <div className="alert">This batch's rows were replaced by a later conversion: the sales rows
           table keeps the last one only. Its sales are in{' '}

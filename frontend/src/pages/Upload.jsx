@@ -44,7 +44,7 @@ export default function Upload() {
   useEffect(() => {
     api.mailSettings().then((s) => {
       setMail(s)
-      setAfter({ enabled: s.auto_on_convert, calculate: s.calculate_first, send: s.send_mail })
+      setAfter({ enabled: s.auto_on_convert, calculate: s.calculate_first, send: s.mail_on_convert })
     }).catch(() => {})
   }, [])
   const result = useRef(null)
@@ -274,13 +274,14 @@ export default function Upload() {
               <span>Then make the Nepal Analyzer for {p.month} {p.year}
                 <small>{after.calculate ? 'Actuals calculated first, ' : ''}
                   {mail.download_after ? 'downloaded here' : 'kept on the batch'}
-                  {after.send ? `, and emailed to ${mail.recipients || '(no address: set one on Analyzer Email)'}` : ''}.
+                  {after.send ? `, and emailed to ${mail.recipients || '(no address: set one on Analyzer Email)'}`
+                    : '. No email now: once every distributor is converted, use Send Mail'}.
                   {' '}<Link to="/masters/analyzer-email">Analyzer Email</Link></small></span></label>
             {after.enabled && <div className="after-opts">
               <label className="check"><input type="checkbox" checked={after.calculate}
                   onChange={(e) => setAfter({ ...after, calculate: e.target.checked })} /><span>Calculate actuals first</span></label>
               <label className="check"><input type="checkbox" checked={after.send}
-                  onChange={(e) => setAfter({ ...after, send: e.target.checked })} /><span>Email it</span></label>
+                  onChange={(e) => setAfter({ ...after, send: e.target.checked })} /><span>Email it now (one distributor's)</span></label>
             </div>}
           </div>}
         </section>

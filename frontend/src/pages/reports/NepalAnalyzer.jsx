@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { api } from '../../api.js'
-import { RunCard, RunList, useRun } from './AnalyzerRun.jsx'
+import { RunList } from './AnalyzerRun.jsx'
+import SendMailPanel from './SendMail.jsx'
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
   'September', 'October', 'November', 'December']
@@ -17,28 +17,10 @@ export default function NepalAnalyzer() {
   const [done, setDone] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const [calc, setCalc] = useState(true)
-  const [to, setTo] = useState('')
-  const [cc, setCc] = useState('')
-  const [runId, setRunId] = useState(null)
   const [jobs, setJobs] = useState([])
-  const [job, setJob] = useRun(runId)
 
   useEffect(() => { api.budgetYears().then(setYears).catch((e) => setErr(e.message)) }, [])
-  useEffect(() => {
-    api.mailSettings().then((s) => { setTo(s.recipients || ''); setCc(s.cc || '') }).catch(() => {})
-  }, [])
-  useEffect(() => { api.analyzerJobs({ limit: 10 }).then(setJobs).catch(() => {}) }, [job?.status])
-
-  async function run(send) {
-    if (!month || !year) { setErr('Select the month and the year.'); setDone(''); return }
-    setErr(''); setDone(''); setBusy(true)
-    try {
-      const j = await api.startAnalyzer({ month, year: Number(year), calculate: calc, send, recipients: to, cc,
-        who: sessionStorage.getItem('ds.who') || 'user' })
-      setJob(j); setRunId(j.id)
-    } catch (e) { setErr(e.message) } finally { setBusy(false) }
-  }
+  useEffect(() => { api.analyzerJobs({ limit: 10 }).then(setJobs).catch(() => {}) }, [])
 
   async function download() {
     if (!month || !year) { setErr('Select the month and the year.'); setDone(''); return }
@@ -83,30 +65,11 @@ export default function NepalAnalyzer() {
         {done && <div className="alert ok">{done}</div>}
       </section>
 
-      <section className="panel">
-        <h2>Calculate and email</h2>
-        <p className="fine">The same workbook, made in the background: the month's actuals calculated first (as
-          Budgeting › Calculate Actuals), then emailed with the workbook attached. Sent from the mailbox set on{' '}
-          <Link to="/masters/analyzer-email">Analyzer Email</Link>.</p>
-        <div className="grid2 de-form">
-          <label><span>To<b aria-hidden="true">*</b></span><input value={to} onChange={(e) => setTo(e.target.value)} /></label>
-          <label><span>Cc</span><input value={cc} onChange={(e) => setCc(e.target.value)} /></label>
-        </div>
-        <label className="check"><input type="checkbox" checked={calc} onChange={(e) => setCalc(e.target.checked)} />
-          <span>Calculate {month || 'the month'}'s actuals first</span></label>
-        <div className="actions">
-          <button className="btn primary" disabled={busy || ['queued', 'running'].includes(job?.status)} onClick={() => run(true)}>
-            {calc ? 'Calculate, make and email' : 'Make and email'}</button>
-          <button className="btn" disabled={busy || ['queued', 'running'].includes(job?.status)} onClick={() => run(false)}>
-            {calc ? 'Calculate and make (no email)' : 'Make (no email)'}</button>
-        </div>
-      </section>
-
-      {job && <RunCard job={job} onChange={(j) => { setJob(j); setRunId(null); setTimeout(() => setRunId(j.id), 0) }} />}
+      <SendMailPanel month={month} year={year} />
 
       <section className="panel">
         <h2>Latest runs</h2>
-        <RunList jobs={jobs} onPick={(j) => { setJob(j); setRunId(j.id) }} />
+        <RunList jobs={jobs} />
       </section>
     </div>
   )

@@ -53,7 +53,8 @@ def year(y):
 def test_settings_start_with_the_address_and_keep_the_password_secret(h, smtp):
     s = ok(c.get("/api/reports/mail-settings", headers=h))
     assert s["recipients"] == "181296shubham@gmail.com"
-    assert s["auto_on_convert"] and s["calculate_first"] and s["send_mail"] and s["download_after"]
+    assert s["auto_on_convert"] and s["calculate_first"] and s["download_after"]
+    assert s["mail_on_convert"] is False              # one mail a month, by Send Mail
     assert s["presets"]["m365"]["smtp_host"] == "smtp.office365.com"
     s = configure(h, smtp)
     assert s["password_set"] and s["password_readable"] and "password" not in s
@@ -139,48 +140,69 @@ def test_microsoft_365_oauth(h, smtp, monkeypatch):
     configure(h, smtp, auth="password")
 
 
-def test_convert_calculates_makes_and_mails(h, smtp):
+def test_convert_calculates_and_makes_but_does_not_mail(h, smtp):
     year(2026)
     yeti = [d for d in ok(c.get("/api/distributors", headers=h)) if d["name"] == "Yetichem"][0]
 
     def upload():
         return ok(c.post("/api/uploads/inspect", headers=h, data={"distributor_id": str(yeti["id"])},
                          files=[("files", ("SALES.zip", ZIP, "application/zip"))]))["token"]
-    token = upload()
+
+    def convert(**more):
+        token = upload()
+        body = {"distributor_id": yeti["id"], "as_of": "2026-10-20", "files": ["AHCPW.xls"], **more}
+        r = c.post(f"/api/uploads/{token}/commit", headers=h, json=body)
+        if r.status_code == 409:                               # names the masters lack: as a person would
+            make_known(r.json()["detail"])
+            r = c.post(f"/api/uploads/{token}/commit", headers=h, json=body)
+        return ok(r)
+
     before = len(smtp.messages)
-    r = c.post(f"/api/uploads/{token}/commit", headers=h, json={
-        "distributor_id": yeti["id"], "as_of": "2026-10-20", "files": ["AHCPW.xls"]})
-    if r.status_code == 409:                                   # names the masters lack: as a person would
-        make_known(r.json()["detail"])
-        r = c.post(f"/api/uploads/{token}/commit", headers=h, json={
-            "distributor_id": yeti["id"], "as_of": "2026-10-20", "files": ["AHCPW.xls"]})
-    b = ok(r)
+    b = convert()
     j = b["analyzer_job"]
-    assert j and j["trigger"] == "convert" and j["batch_id"] == b["batch_id"] and j["calculate"]
+    assert j and j["trigger"] == "convert" and j["batch_id"] == b["batch_id"] and j["calculate"] and not j["send"]
     j = ok(c.get(f"/api/reports/analyzer-jobs/{j['id']}", headers=h))
-    assert (j["status"], j["mail_status"]) == ("done", "sent"), j
+    assert (j["status"], j["mail_status"], j["has_file"]) == ("done", None, True), j
     assert any("actuals worked out" in line for line in j["log"])
     assert j["month"] == b["month"] == "October" and j["distributor"] == "Yetichem"
-    msg = smtp.messages[before][2]
-    assert smtp.messages[before][1] == ["181296shubham@gmail.com"]
-    assert f"batch {b['batch_id']} (Yetichem)" in msg.get_body(("plain",)).get_content()
+    assert len(smtp.messages) == before                        # no mail after a conversion
     listed = ok(c.get(f"/api/reports/analyzer-jobs?batch_id={b['batch_id']}", headers=h))
     assert [x["id"] for x in listed] == [j["id"]]
 
+    # ticked on Convert for once: it mails
+    b = convert(analyzer={"enabled": True, "calculate": True, "send": True})
+    j = ok(c.get(f"/api/reports/analyzer-jobs/{b['analyzer_job']['id']}", headers=h))
+    assert j["mail_status"] == "sent" and len(smtp.messages) == before + 1
+    assert f"batch {b['batch_id']} (Yetichem)" in smtp.messages[-1][2].get_body(("plain",)).get_content()
+
     # unticked on Convert: no run
-    token = upload()
-    b = ok(c.post(f"/api/uploads/{token}/commit", headers=h, json={
-        "distributor_id": yeti["id"], "as_of": "2026-10-20", "files": ["AHCPW.xls"],
-        "analyzer": {"enabled": False}}))
-    assert b["analyzer_job"] is None
+    assert convert(analyzer={"enabled": False})["analyzer_job"] is None
 
     # switched off on Analyzer Email: no run either, and the conversion is as before
     ok(c.put("/api/reports/mail-settings", headers=h, json={"auto_on_convert": False}))
-    token = upload()
-    b = ok(c.post(f"/api/uploads/{token}/commit", headers=h, json={
-        "distributor_id": yeti["id"], "as_of": "2026-10-20", "files": ["AHCPW.xls"]}))
+    b = convert()
     assert b["analyzer_job"] is None and b["rows"] > 0
     ok(c.put("/api/reports/mail-settings", headers=h, json={"auto_on_convert": True}))
+
+
+def test_send_mail_for_the_month_once_every_distributor_is_in(h, smtp):
+    st = ok(c.get("/api/reports/month-status", headers=h))           # the latest batch's month
+    assert (st["month"], st["year"]) == ("October", 2026)
+    by = {d["name"]: d for d in st["distributors"]}
+    assert set(by) >= {"Yetichem", "Pharmachem", "Gunjeshwari"}
+    assert by["Yetichem"]["converted"] and by["Yetichem"]["rows"] > 0 and by["Yetichem"]["last_batch"]
+    assert not by["Pharmachem"]["converted"] and by["Pharmachem"]["last_batch"] is None
+    assert st["all_converted"] is False
+    before = len(smtp.messages)
+    j = ok(c.post("/api/reports/analyzer-jobs", headers=h, json={
+        "month": "October", "year": 2026, "calculate": True, "send": True}))
+    j = ok(c.get(f"/api/reports/analyzer-jobs/{j['id']}", headers=h))
+    assert (j["status"], j["mail_status"]) == ("done", "sent") and len(smtp.messages) == before + 1
+    st = ok(c.get("/api/reports/month-status?month=october&year=2026", headers=h))
+    assert st["last_mail"]["id"] == j["id"] and st["last_mail"]["recipients"] == "181296shubham@gmail.com"
+    other = ok(c.get("/api/reports/month-status?month=July&year=2026", headers=h))
+    assert other["month"] == "July" and not any(d["converted"] for d in other["distributors"])
+    assert c.get("/api/reports/month-status?month=Smarch&year=2026", headers=h).status_code == 400
 
 
 def test_a_run_that_cannot_calculate_says_why(h, smtp):

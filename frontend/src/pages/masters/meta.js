@@ -17,6 +17,7 @@ export const MENUS = [
             { to: '/masters/budget-report', title: 'Budget Report' }] },
   { label: 'Sales', groups: ['Sales'], links: [{ to: '/masters/data-error', title: 'Data Error' }] },
   { label: 'Reports', groups: [], links: [{ to: '/masters/nepal-analyzer', title: 'Nepal Analyzer' },
+                                         { to: '/masters/send-mail', title: 'Send Mail' },
                                          { to: '/masters/analyzer-email', title: 'Analyzer Email' }] },
 ]
 export const GROUPS = MENUS.flatMap((m) => m.groups)

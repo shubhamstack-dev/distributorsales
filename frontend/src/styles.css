@@ -444,3 +444,4 @@ td.row-actions>div{display:inline-flex;gap:6px}
 .stack > label:not(.check){display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
 .stack h3{margin:18px 0 6px}
 .actions input{flex:0 1 340px;min-width:200px}
+.dist-status{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 12px}

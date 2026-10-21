@@ -5,6 +5,7 @@ import TerrPgPage from './TerrPgPage.jsx'
 import DataError from './DataError.jsx'
 import NepalAnalyzer from '../reports/NepalAnalyzer.jsx'
 import AnalyzerEmail from '../reports/AnalyzerEmail.jsx'
+import { SendMailPage } from '../reports/SendMail.jsx'
 import { BudgetActuals, BudgetReport, BudgetUpload, BudgetZero } from './Budget.jsx'
 import { useMasterMeta } from './meta.js'
 
@@ -26,6 +27,7 @@ export default function Masters() {
       <Route path="data-error" element={<DataError />} />
       <Route path="nepal-analyzer" element={<NepalAnalyzer />} />
       <Route path="analyzer-email" element={<AnalyzerEmail />} />
+      <Route path="send-mail" element={<SendMailPage />} />
       <Route path="budget-upload" element={<BudgetUpload />} />
       <Route path="budget-report" element={<BudgetReport />} />
       <Route path="budget-zero" element={<BudgetZero />} />
