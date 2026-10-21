@@ -3,6 +3,7 @@ import MasterPage from './MasterPage.jsx'
 import MasterUpload from './MasterUpload.jsx'
 import TerrPgPage from './TerrPgPage.jsx'
 import DataError from './DataError.jsx'
+import NepalAnalyzer from '../reports/NepalAnalyzer.jsx'
 import { BudgetActuals, BudgetReport, BudgetUpload, BudgetZero } from './Budget.jsx'
 import { useMasterMeta } from './meta.js'
 
@@ -22,6 +23,7 @@ export default function Masters() {
       <Route path="upload" element={<MasterUpload meta={meta} />} />
       <Route path="terr-pg/:kind" element={<TerrPgPage meta={meta} />} />
       <Route path="data-error" element={<DataError />} />
+      <Route path="nepal-analyzer" element={<NepalAnalyzer />} />
       <Route path="budget-upload" element={<BudgetUpload />} />
       <Route path="budget-report" element={<BudgetReport />} />
       <Route path="budget-zero" element={<BudgetZero />} />

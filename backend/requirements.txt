@@ -11,3 +11,4 @@ httpx
 pytest
 xlwt
 python-calamine==0.8.2
+XlsxWriter==3.2.0

@@ -137,6 +137,8 @@ export const api = {
   budgetActuals: (year, month) => call('POST', '/api/budget/calculate-actuals', { year, month }),
   budgetReport: (params) => call('GET', `/api/budget/report?${qs(params)}`),
   budgetExport: (params) => save(`/api/budget/report/export?${qs(params)}`, `BUDGET_REPORT_${params.year}.xlsx`),
+  nepalAnalyzer: (month, year) => save(`/api/reports/nepal-analyzer?${qs({ month, year })}`,
+    `NepalAnalyzerReports_${month}${year}.xlsx`),
   dataError: (distributorId, fileType) =>
     call('GET', `/api/data-error?${qs({ distributor_id: distributorId, file_type: fileType })}`),
   terrPg: (kind, params) => call('GET', `/api/terr-pg/${kind}?${qs(params)}`),

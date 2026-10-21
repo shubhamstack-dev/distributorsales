@@ -393,6 +393,35 @@ SALES_COLUMNS = [
 ]
 MID_SALES_COLUMNS = SALES_COLUMNS + [("MID", 30)]
 
+# Expiry sales and the expiry adjustments (Book1.xlsx). DATE and EXDATE are text,
+# as the old data has them: '2022.02.21', '12.08.2021', '31/12/1899', '12/202'.
+EXPIRY_COLUMNS = [
+    ("ID", "int"), ("DIST_ID", "int"), ("PRODUCT_NAME", 250), ("PRODUCT_ID", "int"),
+    ("PRODUCT_GROUP_ID", "int"), ("RATE", "num"), ("HQ_ID", "int"), ("MONTH", 20), ("YEAR", "int"),
+    ("TERRITORY_ID", "int"), ("PRODUCT_BRAND_ID", "int"), ("DIST_NAME", 120), ("STATUS", 30),
+    ("SALES_QTY", "num"), ("OPENING_QTY", "num"), ("ISSUED_QTY", "num"), ("CLOSING_STOCK_QTY", "num"),
+    ("CLOSING_STOCK_VALUE", "num"), ("SALES_VALUE", "num"), ("CUSTOMER_NAME", 250),
+    ("CUSTOMER_MASTER_NAME", 250), ("PRODUCT_GROUP_NAME", 120), ("DATE", 30), ("MRP", "num"),
+    ("BATCH", 60), ("EXDATE", 30), ("AMOUNT", "num"), ("TOTAL_AMOUNT", "num"), ("CUSTOM_CHARGE", "num"),
+    ("HQ_NAME", 120), ("TERRITORY_NAME", 120), ("PRODUCT_BRAND_NAME", 120), ("INVOICE_NO", 60),
+    ("Latitude", "num"), ("Longitude", "num"), ("CUSTOMER_ID", "int"), ("FREE_QUANTITY", "num"),
+    ("RETURN_QUANTITY", "num"), ("PRODUCT_MASTER_NAME", 250), ("PRODUCT_BRAND_CATEGORY", 30),
+    ("DATA", 10),
+]
+ADJUSTMENT_COLUMNS = [
+    ("ID", "int"), ("DIST_ID", "int"), ("PRODUCT_NAME", 250), ("PRODUCT_ID", "int"),
+    ("PRODUCT_GROUP_ID", "int"), ("RATE", "num"), ("HQ_ID", "int"), ("MONTH", 20), ("YEAR", "int"),
+    ("TERRITORY_ID", "int"), ("PRODUCT_BRAND_ID", "int"), ("DIST_NAME", 120), ("STATUS", 30),
+    ("SALES_QTY", "num"), ("CUSTOMER_NAME", 250), ("CUSTOMER_MASTER_NAME", 250),
+    ("PRODUCT_GROUP_NAME", 120), ("HQ_NAME", 120), ("TERRITORY_NAME", 120), ("PRODUCT_BRAND_NAME", 120),
+    ("INVOICE_NO", 60), ("Latitude", "num"), ("Longitude", "num"), ("CUSTOMER_ID", "int"),
+    ("FREE_QUANTITY", "num"), ("RETURN_QUANTITY", "num"), ("PRODUCT_MASTER_NAME", 250),
+    ("PRODUCT_BRAND_CATEGORY", 30), ("DATE", 30), ("MRP", "num"), ("BATCH", 60), ("EXDATE", 30),
+    ("AMOUNT", "num"), ("CUSTOM_CHARGE", "num"), ("EXPIRY_DATA", 10), ("EXPIRY_QTY", "num"),
+    ("EXPIRY_RATE", "num"), ("EXPIRY_AMOUNT", "num"), ("EXPIRY_TOTAL_AMOUNT", "num"),
+    ("EXPIRY_FREE_QTY", "num"), ("ADJUSTED_MONTH", 20),
+]
+
 BUDGET_COLUMNS = [
     ("ID", "int"), ("S_NO", "int"), ("EMPLOYEE_ID", "int"), ("PRODUCT_GROUP", 120), ("PRODUCT_BRAND", 120),
     ("HQ_NAME", 120), ("PRODUCT_ID", "int"), ("PRODUCT_NAME", 250), ("TARGET_YEAR", "int"),
@@ -449,6 +478,18 @@ MidSalesMapping = _table(
     (Index("ix_mapping_mid_year_month", "YEAR", "MONTH"), Index("ix_mapping_mid_customer", "CUSTOMER_ID"),
      Index("ix_mapping_mid_product", "PRODUCT_ID"), Index("ix_mapping_mid_hq", "HQ_ID")),
     doc="Mid-month sales: MAPPING_MASTER_MID, the same columns plus MID.")
+
+ExpirySales = _table(
+    "ExpirySales", "MAPPING_MASTER_EXPIRY", EXPIRY_COLUMNS,
+    (Index("ix_mapping_expiry_year_month", "YEAR", "MONTH"),
+     Index("ix_mapping_expiry_dist", "DIST_NAME")),
+    doc="Expiry sales: MAPPING_MASTER_EXPIRY of the old system (Book1.xlsx).")
+
+Adjustment = _table(
+    "Adjustment", "ADJUSTMENT", ADJUSTMENT_COLUMNS,
+    (Index("ix_adjustment_year_month", "YEAR", "MONTH"), Index("ix_adjustment_dist", "DIST_NAME")),
+    doc="Expiry adjustments: ADJUSTMENT of the old system (Book1.xlsx). EXPIRY_TOTAL_AMOUNT is "
+        "what the Nepal Analyzer takes off a month's sales.")
 
 # The workbook's S_NO repeats (one S_NO per budget line, shared by every HQ and
 # employee it is split across), so BUDGET_MASTER gets its own ID and a row is

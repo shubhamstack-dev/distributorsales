@@ -339,7 +339,8 @@ Administration opens one panel of four columns:
 |---|---|
 | Assignment | **Customer Terr-PG**, **Employee Terr-PG**, **Team PG HQ** (`TEAM_PG_HQ_ASSIGNMENT`) |
 | Budgeting | **Budget** (`BUDGET_MASTER`), **Head Count** (`HEAD_COUNT`: DIVISION, HQ, COUNT; filled from the workbook, keyed on DIVISION + HQ, and on screen only COUNT is edited — no Add, no Delete, refused by the API too) |
-| Sales | **Sales** (`MAPPING_MASTER`), **Mid sales** (`MAPPING_MASTER_MID`) |
+| Sales | **Sales** (`MAPPING_MASTER`), **Mid sales** (`MAPPING_MASTER_MID`), **Expiry sales** (`MAPPING_MASTER_EXPIRY`), **Adjustment** (`ADJUSTMENT`), Data Error |
+| Reports | **Nepal Analyzer** (below) |
 
 **Customer Terr-PG and Employee Terr-PG** are one page each, as in the old
 system: every product assignment with its territory beside it (Customer Name,
@@ -458,6 +459,8 @@ uploaded from one workbook on *Upload master data* (or each from its own screen)
 |---|---|---|
 | Sales | `MAPPING_MASTER` (33 columns) | `ID` |
 | Mid sales | `MAPPING_MASTER_MID` (34: the same plus `MID`) | `ID` |
+| Expiry sales | `MAPPING_MASTER_EXPIRY` (41; DATE and EXDATE are text, as the old data has them) | `ID` |
+| Adjustment | `ADJUSTMENT` (41: the expiry adjustments, EXPIRY_TOTAL_AMOUNT, ADJUSTED_MONTH) | `ID` |
 | Budget | `BUDGET_MASTER` (120 + this app's `ID`); the sheet `BUDGET_MASTER_TEST_NEW` is read into it | `S_NO` + `EMPLOYEE_ID` + `HQ_ID` |
 | Customer territory assignment | `CUSTOMER_TERR_ASSIGNMENT` | every column |
 | Customer product assignment | `CUSTOMER_PG_ASSIGNMENT` | every column |
@@ -522,6 +525,66 @@ ID and repoints the assignment keys. The old `md_customer` / `md_sku` /
 `md_brand` / `md_employee` / alias tables are left in place unused; see
 `migrations/003_master_data_tables.sql` to drop them once the masters are
 uploaded again.
+
+## Reports › Nepal Analyzer
+
+The old Reports/NewNepal_Analyser.aspx (`app/reports/nepal_analyzer.py`,
+`GET /api/reports/nepal-analyzer?month=September&year=2026`). Month and Year,
+Download: **NepalAnalyzerReports_September2026.xlsx**, the old workbook's 18
+sheets with their names and columns (NEPAL LEVEL … SALES ADJUSTMENT), in its
+look: Georgia 9, thin borders, a baby-blue heading, Total rows light green, All
+Total pink.
+
+The figures are the old page's, with its mistakes put right:
+
+* Totals are worked out from the real sums, not by adding rounded rows, so the
+  same All Total reads the same on every sheet (the old file had 5041.98,
+  5041.95 and 5042.00 for one figure), and SALES' INR total is its NPR total /
+  1.6.
+* A Total holds its own group only. The old page ran a group with no target on
+  into the next Total, never set ALL HQ LEVEL's YTD RETURN back to 0, and
+  added January's returns as JUNE RETURN.
+* A Total sits under its own rows (the old sort put "CREMAFFIN Total" after
+  the CREMAFFIN PLUS rows).
+* Returns are in INR lakh: BUDGET_MASTER keeps <M>_RETURN in INR already; the
+  old queries took 1.6 off again, and ALL HQ LEVEL divided each month's return
+  by the head count. ALL HQ LEVEL's head count is the division's, as on HQ LEVEL.
+* The EXPIRY ADJUST sheets take the expiry off in INR (the old NET SALE took
+  the NPR figure off INR sales); NEPAL LEVEL's November YTD expiry includes
+  November (the old query said NOVEMVER).
+* An empty month counts as 0 (the old YTD dropped a whole budget row for one
+  empty month); an empty return quantity likewise.
+* Sales are worked out in full precision (the old CAST … AS FLOAT is single
+  precision in MySQL), and SALES ADJUSTMENT does not round rates first, so it
+  agrees with SALES.
+* Nothing to divide by gives an empty cell, on rows and Totals alike (not 0,
+  NaN or -Infinity). Only Total rows are coloured (the old page coloured any
+  row with "total" in it, a customer's name included). Names lose stray spaces.
+* SKUs are in number order (the old tables held PRODUCT_ID as text: 155 before 40).
+* Budget sheets take the year asked and the year before; brands with nothing
+  in either are no longer listed as rows of zeros. DISTRIBUTOR LEVEL lists the
+  distributors with sales in the year.
+
+Unchanged on purpose: targets /100000 and sales /160000 (NPR to INR at 1.6) as
+the old report; ABM rows say HQ Kathmandu and the employees' Total is "All
+Total(Rahul Dharwad)", as the old file. BUDGET_MASTER's <M>_EXPIRY_ADJUSTED is
+read as it is; the old procedures that filled it (SP_CALCULATE_EXPIRY_*) were
+not among the files given.
+
+**Faster.** The old page sent about 3,200 queries for a month (one per sales
+row, twice, for the employee names; one per distributor; BUDGET_MASTER scanned
+nine times across every year; SALES and EXPIRY each run twice), then built
+the workbook cell by cell. Here it is about 20: the budget is read once for all
+eight budget sheets (the TBMs' rows added up in MySQL), each sales query runs
+once for the month and year asked, and the employees of every HQ come from one
+query; the workbook is written with XlsxWriter. On 144,000 sales rows and four
+years: the old queries alone 6.5 s; the whole new report, workbook included,
+2.7 s. A month of the real size (about 1,100 sales rows) takes under a second.
+
+`tests/test_nepal_analyzer.py` rebuilds September 2026 from the old file
+(tests/data) and checks every sheet and heading, the sales, distributor and
+employee figures, and each fix above on a budget worked out by hand. With
+`NEPAL_TEST_MYSQL=mysql+pymysql://…` the same tests run on MySQL too.
 
 ## What it does not do
 

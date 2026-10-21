@@ -587,6 +587,26 @@ SPECS: list[Spec] = [
          sheets=["MAPPING_MASTER_MID", "MID_SALES", "MIDSALES", "MID_MONTH_SALES"],
          description="MAPPING_MASTER_MID: the mid-month sales, the same columns as Sales plus MID."),
 
+    Spec("expiry_sales", "Expiry sales", "Sales & budget", X.ExpirySales,
+         [*_c(ID_FIELD), *_table_fields(X.EXPIRY_COLUMNS, SALES_LISTED + ["AMOUNT", "TOTAL_AMOUNT"])],
+         label=lambda o: f"{o.id} — {o.customer_name or ''} · {o.product_name or ''}",
+         search=SALES_SEARCH + ["batch"], order=["-id"], bulk=True, match=("id",),
+         filters=["year", "month", "dist_name", "hq_id", "product_group_id"],
+         sheets=["MAPPING_MASTER_EXPIRY", "EXPIRY_SALES", "EXPIRY"],
+         description="MAPPING_MASTER_EXPIRY: expiry sales, one row per line, with the batch, expiry "
+                     "date, amount and custom charge. A row is found again by its ID."),
+
+    Spec("adjustment", "Adjustment", "Sales & budget", X.Adjustment,
+         [*_c(ID_FIELD), *_table_fields(X.ADJUSTMENT_COLUMNS,
+                                         SALES_LISTED + ["EXPIRY_TOTAL_AMOUNT", "ADJUSTED_MONTH"])],
+         label=lambda o: f"{o.id} — {o.customer_name or ''} · {o.product_name or ''}",
+         search=SALES_SEARCH + ["batch"], order=["-id"], bulk=True, match=("id",),
+         filters=["year", "month", "dist_name", "hq_id", "product_group_id"],
+         sheets=["ADJUSTMENT", "ADJUSTMENTS", "EXPIRY_ADJUSTMENT"],
+         description="ADJUSTMENT: the expiry adjustments, with EXPIRY_QTY, EXPIRY_RATE, "
+                     "EXPIRY_TOTAL_AMOUNT and the ADJUSTED_MONTH they are taken off. A row is found "
+                     "again by its ID."),
+
     Spec("head_count", "Head Count", "Budgeting", X.HeadCount, [
         Field("division", "DIVISION", required=True, create_only=True,
               locked_help="From the workbook; only COUNT is changed here."),
@@ -704,6 +724,8 @@ LAYOUT = {
                    _cols(("Division", "division", 1), ("HQ", "hq"), ("Count", "count"))),
     "sales": ("Sales", "Sales", []),
     "mid_sales": ("Mid sales", "Sales", []),
+    "expiry_sales": ("Expiry sales", "Sales", []),
+    "adjustment": ("Adjustment", "Sales", []),
 }
 MENU_ORDER = list(LAYOUT)
 
