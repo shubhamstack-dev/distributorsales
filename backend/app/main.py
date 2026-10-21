@@ -7,7 +7,7 @@ import re
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from . import config, models as M, models_master  # noqa: F401 — registers the tables
+from . import config, models as M, models_master, models_report  # noqa: F401 — registers the tables
 from .database import Base, SessionLocal, engine
 from .routers import api, assign_ops, budget, data_error, master_upload, masters, reports, terr_pg
 from .services import migrate, seed, triggers
@@ -69,6 +69,9 @@ try:
             print(f"[startup] {done}", flush=True)
         for done in seed.ensure_dist_ids(_db):
             print(f"[startup] {done}", flush=True)
+        from .reports.analyzer_job import stop_unfinished
+        if (n := stop_unfinished(_db)):
+            print(f"[startup] {n} Nepal Analyzer run(s) cut short by the restart marked failed", flush=True)
     finally:
         _db.close()
 except Exception as e:                       # never stop the API booting over seeding

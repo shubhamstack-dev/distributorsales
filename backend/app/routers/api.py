@@ -7,13 +7,14 @@ import time
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import delete, func, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from .. import config, models as M, models_master as X
 from ..database import get_db
+from ..reports import analyzer_job as AJ
 from ..services import excel, name_check, names as namesvc, parse, triggers
 from ..services.auth import issue_token, password_ok
 from ..services.rules import period
@@ -267,8 +268,10 @@ async def inspect(files: list[UploadFile] = File(...), distributor_id: int = For
 
 
 @router.post("/uploads/{token}/commit")
-def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
-    """Convert the chosen files and keep the result."""
+def commit(token: str, background: BackgroundTasks, body: dict = Body(...), db: Session = Depends(get_db)):
+    """Convert the chosen files and keep the result. Then, when Analyzer Email
+    says so (and Convert did not untick it), a Nepal Analyzer run for the month:
+    actuals, workbook, email (reports/analyzer_job.py), after the reply."""
     folder = _staging(token)
     if not os.path.isdir(folder):
         raise HTTPException(410, "That upload has expired. Send the files again.")
@@ -410,7 +413,12 @@ def commit(token: str, body: dict = Body(...), db: Session = Depends(get_db)):
     batch.total_qty, batch.total_amount = tot_q, round(tot_a, 2)
     db.commit()
     shutil.rmtree(folder, ignore_errors=True)
+    job = AJ.after_convert(db, batch, p["month"], p["year"], body.get("analyzer"), body.get("who"))
+    if job is not None:
+        background.add_task(AJ.run, sessionmaker(bind=db.get_bind(), autoflush=False,
+                                                 expire_on_commit=False), job.id)
     return {"batch_id": batch.id, "rows": seq, "omitted": omitted,
+            "analyzer_job": AJ.out(job) if job is not None else None,
             "total_qty": tot_q, "total_amount": round(tot_a, 2),
             "month": p["month"], "year": p["year"], "mid_month": p["mid_month"],
             "wrapped": p["wrapped"], "mapping_tables": list(replaced),

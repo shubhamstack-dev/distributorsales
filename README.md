@@ -581,6 +581,44 @@ query; the workbook is written with XlsxWriter. On 144,000 sales rows and four
 years: the old queries alone 6.5 s; the whole new report, workbook included,
 2.7 s. A month of the real size (about 1,100 sales rows) takes under a second.
 
+### Analyzer Email: after every conversion, or by hand
+
+**Reports › Analyzer Email** (`reports/analyzer_job.py`, `services/mailer.py`).
+When a zip is converted, a run starts by itself after the reply (Convert shows
+it, with a tick to skip it once):
+
+1. the month converted gets its actuals calculated, as Budgeting › Calculate Actuals;
+2. the Nepal Analyzer is made for that month, kept on the run;
+3. it downloads in the browser (the batch page shows the run, step by step);
+4. it is emailed, workbook attached, to the addresses set (181296shubham@gmail.com
+   to begin with), with the month's target, sale, % achieved, distributors and
+   divisions in the body.
+
+**By hand:** Nepal Analyzer › *Calculate and email* (any month, any addresses,
+with or without calculating first); every run's workbook can be downloaded
+or sent again (to the same or other addresses) from the batch, Nepal Analyzer
+or Analyzer Email.
+
+Sending is SMTP, set on Analyzer Email (buttons fill in Microsoft 365, Google
+Workspace / Gmail, Zoho India):
+
+* **Microsoft 365 (OAuth, no password)** — Tenant ID, Client ID and Client
+  secret of an Entra app with the Exchange Online application permission
+  `SMTP.SendAsApp` (admin consent) and the mailbox granted to the app in
+  Exchange. The ProjectSystem's app (same tenant and client ID) already sends
+  this way, so its values can be used.
+* **User and password** — any SMTP server (Gmail needs an app password).
+
+Passwords and the client secret are stored encrypted with SECRET_KEY. Runs go
+one at a time; a conversion is never held up or undone by its run; a run that
+fails says why (on the batch and on Analyzer Email) and keeps its workbook if
+it got that far; a run the server was in the middle of when it restarted is
+marked so at startup, ready to be sent again. API: `/api/reports/analyzer-jobs`
+(start, list, one, `/file`, `/send`), `/api/reports/mail-settings` (+ `/test`).
+`tests/test_analyzer_mail.py` runs it against a small SMTP server of its own
+(password and XOAUTH2 sign-in, attachment, a failed send sent again, Convert
+starting it, settings switching it off).
+
 `tests/test_nepal_analyzer.py` rebuilds September 2026 from the old file
 (tests/data) and checks every sheet and heading, the sales, distributor and
 employee figures, and each fix above on a budget worked out by hand. With

@@ -16,7 +16,8 @@ export const MENUS = [
             { to: '/masters/budget-actuals', title: 'Calculate Actuals' },
             { to: '/masters/budget-report', title: 'Budget Report' }] },
   { label: 'Sales', groups: ['Sales'], links: [{ to: '/masters/data-error', title: 'Data Error' }] },
-  { label: 'Reports', groups: [], links: [{ to: '/masters/nepal-analyzer', title: 'Nepal Analyzer' }] },
+  { label: 'Reports', groups: [], links: [{ to: '/masters/nepal-analyzer', title: 'Nepal Analyzer' },
+                                         { to: '/masters/analyzer-email', title: 'Analyzer Email' }] },
 ]
 export const GROUPS = MENUS.flatMap((m) => m.groups)
 export const menuOf = (group) => MENUS.find((m) => m.groups.includes(group) || m.also?.includes(group))?.label

@@ -431,3 +431,16 @@ td.row-actions>div{display:inline-flex;gap:6px}
 .budget-grid td,.budget-grid th{white-space:nowrap}
 .budget-grid td:nth-child(4),.budget-grid td:nth-child(12){white-space:normal;min-width:170px}
 .budget-grid tfoot td{border-top:1px solid var(--line-2);background:rgba(255,255,255,.03)}
+
+/* Nepal Analyzer runs */
+.run-log{list-style:none;padding:0;margin:8px 0 12px;font-family:var(--mono);font-size:.82rem;line-height:1.6}
+.run-log li{white-space:pre-wrap}
+.mail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px}
+.mail-grid .panel{margin:0}
+.presets{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 14px}
+.after-convert{margin-top:14px;padding-top:12px;border-top:1px solid var(--line-2)}
+.after-convert .check{align-self:start;padding-bottom:4px}
+.after-opts{display:flex;gap:22px;margin:4px 0 0 27px}
+.stack > label:not(.check){display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.stack h3{margin:18px 0 6px}
+.actions input{flex:0 1 340px;min-width:200px}

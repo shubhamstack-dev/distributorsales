@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, Link } from 'react-router-dom'
 import { api } from '../api.js'
+import { RunCard, useRun } from './reports/AnalyzerRun.jsx'
 
 const money = (n) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -12,6 +13,14 @@ export default function BatchDetail() {
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [msg, setMsg] = useState(null)
+  const loc = useLocation()
+  const fresh = loc.state?.analyzerJob               // the run Convert just started
+  const [runId, setRunId] = useState(fresh || null)
+  const [run, setRun] = useRun(runId, { autoDownload: !!(fresh && loc.state?.download) })
+  useEffect(() => {
+    if (fresh) return
+    api.analyzerJobs({ batch_id: id, limit: 1 }).then((l) => l[0] && setRunId(l[0].id)).catch(() => {})
+  }, [id, fresh])
 
   useEffect(() => { api.batch(id).then(setB).catch((e) => setMsg({ bad: true, t: e.message })) }, [id])
   useEffect(() => {
@@ -42,6 +51,8 @@ export default function BatchDetail() {
       </div>
       {msg && <div className={`alert ${msg.bad ? 'bad' : 'ok'}`}>{msg.t}</div>}
       {b.notes && <div className="alert info">{b.notes}</div>}
+      {run && <RunCard job={run} title={`Nepal Analyzer after this conversion`}
+                       onChange={(j) => { setRun(j); setRunId(null); setTimeout(() => setRunId(j.id), 0) }} />}
       {b.rows_replaced && (
         <div className="alert">This batch's rows were replaced by a later conversion: the sales rows
           table keeps the last one only. Its sales are in{' '}

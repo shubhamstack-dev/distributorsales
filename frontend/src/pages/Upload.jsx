@@ -39,6 +39,14 @@ export default function Upload() {
   const [over, setOver] = useState(false)
   const [err, setErr] = useState('')
   const [blocked, setBlocked] = useState(null)   // a refused conversion's lists
+  const [mail, setMail] = useState(null)         // Analyzer Email's settings
+  const [after, setAfter] = useState({ enabled: false, calculate: true, send: true })
+  useEffect(() => {
+    api.mailSettings().then((s) => {
+      setMail(s)
+      setAfter({ enabled: s.auto_on_convert, calculate: s.calculate_first, send: s.send_mail })
+    }).catch(() => {})
+  }, [])
   const result = useRef(null)
   useEffect(() => {
     if ((blocked || err) && result.current) result.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -96,9 +104,10 @@ export default function Upload() {
       const r = await api.commit(found.token, {
         distributor_id: Number(distId), as_of: asOf, cutoff_day: Number(cutoff),
         mid_cutoff_day: Number(midCutoff), files: chosen.map((f) => f.name), source: found.source,
-        who: sessionStorage.getItem('ds.who') || 'user',
+        who: sessionStorage.getItem('ds.who') || 'user', analyzer: after,
       })
-      nav(`/batches/${r.batch_id}`)
+      nav(`/batches/${r.batch_id}`, { state: r.analyzer_job
+        ? { analyzerJob: r.analyzer_job.id, download: !!mail?.download_after } : null })
     } catch (e) {
       // names not in the masters: nothing converted, the list of what to put right
       if (e.status === 409 && e.detail?.new_customers) { setBlocked(e.detail); setErr('') }
@@ -259,6 +268,21 @@ export default function Upload() {
             </button>
             <span className="fine">{p.month} {p.year}, Mid Month {p.mid}, on every row.</span>
           </div>
+          {mail && <div className="after-convert">
+            <label className="check"><input type="checkbox" checked={after.enabled}
+                onChange={(e) => setAfter({ ...after, enabled: e.target.checked })} />
+              <span>Then make the Nepal Analyzer for {p.month} {p.year}
+                <small>{after.calculate ? 'Actuals calculated first, ' : ''}
+                  {mail.download_after ? 'downloaded here' : 'kept on the batch'}
+                  {after.send ? `, and emailed to ${mail.recipients || '(no address: set one on Analyzer Email)'}` : ''}.
+                  {' '}<Link to="/masters/analyzer-email">Analyzer Email</Link></small></span></label>
+            {after.enabled && <div className="after-opts">
+              <label className="check"><input type="checkbox" checked={after.calculate}
+                  onChange={(e) => setAfter({ ...after, calculate: e.target.checked })} /><span>Calculate actuals first</span></label>
+              <label className="check"><input type="checkbox" checked={after.send}
+                  onChange={(e) => setAfter({ ...after, send: e.target.checked })} /><span>Email it</span></label>
+            </div>}
+          </div>}
         </section>
       )}
       {/* what Convert said goes under its button, where the eye is, and scrolls into view */}
