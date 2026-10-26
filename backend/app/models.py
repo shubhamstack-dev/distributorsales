@@ -102,7 +102,8 @@ class BatchFile(Base):
         "BatchId", ForeignKey("batch.Id", ondelete="CASCADE"), nullable=False)
     file_name: Mapped[str] = mapped_column("FileName", String(255), nullable=False)
     used: Mapped[int] = mapped_column("Used", Integer, nullable=False, default=0)
-    layout: Mapped[str | None] = mapped_column("Layout", String(30))
+    # every sheet's layout, e.g. "register (sales), register (sales return)"
+    layout: Mapped[str | None] = mapped_column("Layout", String(255))
     rows: Mapped[int] = mapped_column("Rows", Integer, nullable=False, default=0)
     omitted: Mapped[int] = mapped_column("Omitted", Integer, nullable=False, default=0)
     detail: Mapped[str | None] = mapped_column("Detail", String(500))

@@ -368,9 +368,9 @@ def commit(token: str, background: BackgroundTasks, body: dict = Body(...), db: 
     db.add(batch)
     db.flush()
     for name, used, r in files:
-        db.add(M.BatchFile(batch_id=batch.id, file_name=name, used=1 if used else 0,
-                           layout=(", ".join(s["layout"] for s in r["sheets"] if s["layout"])
-                                   if r else None),
+        db.add(M.BatchFile(batch_id=batch.id, file_name=name[:255], used=1 if used else 0,
+                           layout=(", ".join(dict.fromkeys(s["layout"] for s in r["sheets"] if s["layout"]))
+                                   [:255] if r else None),
                            rows=len(r["rows"]) if r else 0, omitted=r["omitted"] if r else 0,
                            detail=(r["error"] if r else "not chosen")))
     omitted = sum(r["omitted"] for _, used, r in files if used)

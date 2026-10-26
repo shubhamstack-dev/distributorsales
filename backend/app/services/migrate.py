@@ -38,7 +38,9 @@ ADDED = {
         "md_designation", "md_role", "md_team")},
 }
 # MySQL only: columns made wider after release -> (table, column, DDL, length)
-WIDEN = [("distributor", "Note", "VARCHAR(700) NULL", 700)]
+WIDEN = [("distributor", "Note", "VARCHAR(700) NULL", 700),
+         # 30 was too short for a workbook with a sales and a sales-return sheet
+         ("batch_file", "Layout", "VARCHAR(255) NULL", 255)]
 # MySQL only: foreign keys for columns added above (SQLite cannot add them later)
 FKS = [("distributor", "fk_dist_country", "CountryId", "md_country", "Id")]
 # The alignment tables pointed at md_customer / md_sku / md_employee before the

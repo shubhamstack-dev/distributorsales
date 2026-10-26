@@ -39,3 +39,12 @@ def test_an_old_database_gets_every_listed_column(tmp_path):
         have = {c["name"] for c in insp.get_columns(table)}
         assert {c for c, _ in cols} <= have, (table, {c for c, _ in cols} - have)
     assert "NprRate" in {c["name"] for c in insp.get_columns("batch")}
+
+
+def test_a_sales_and_returns_workbook_layout_fits():
+    """A Pharmachem workbook with an INVOICE and a SALES RETURN sheet is kept as
+    'register (sales), register (sales return)' (41 characters): it once
+    stopped the conversion with 'Data too long for column Layout' on MySQL."""
+    layout = "register (sales), register (sales return)"
+    assert models.BatchFile.__table__.c.Layout.type.length >= len(layout) + 100
+    assert ("batch_file", "Layout", "VARCHAR(255) NULL", 255) in migrate.WIDEN
