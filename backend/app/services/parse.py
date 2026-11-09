@@ -165,9 +165,14 @@ def _parse_cross_tab(rows, hr, out, stats):
         for c in cols:
             cell = row[c] if c < len(row) else None
             m = QTY.match(str(cell if cell is not None else ""))
-            if not m:
+            if m:
+                q, f = _num(m.group(1)), _num(m.group(2))
+            elif _isnum(cell):
+                # a figure alone: Excel keeps "-70 + 0" as the number -70 (a
+                # return); it is that quantity, nothing free
+                q, f = _num(cell), 0.0
+            else:
                 continue
-            q, f = _num(m.group(1)), _num(m.group(2))
             if q == 0 and f == 0:            # nothing bought and nothing given
                 stats["omitted"] += 1
                 continue

@@ -128,3 +128,19 @@ def test_an_old_database_gets_the_new_description():
         db.commit()
     finally:
         db.close()
+
+
+def test_a_figure_alone_in_a_cell_is_read():
+    """Excel keeps '-70 + 0' as the number -70: it is a quantity of -70, nothing
+    free (Janapremi Medical Hall's ROVAMYCIN FORTE and Themjon Traders' DUPHALAC
+    ENEMA 300ML, CLOSING SALES FIGURE, October 2026, were left out before)."""
+    book = _xls(["Janapremi Medical Hall", "Om Medicals"], [
+        ("ROVAMYCIN FORTE", [(-70, -50043), ("10 + 0", 7149)]),
+        ("DUPHALAC ENEMA 300ML", [(-1, -285.34), (0, 0)]),          # a 0 alone: nothing, left out
+    ])
+    r = read_book("AHCPW.xls", book)
+    got = [(x["customer"], x["product"], x["qty"], x["free"], x["amount"]) for x in r["rows"]]
+    assert got == [("Janapremi Medical Hall", "ROVAMYCIN FORTE", -70.0, 0.0, -50043.0),
+                   ("Om Medicals", "ROVAMYCIN FORTE", 10.0, 0.0, 7149.0),
+                   ("Janapremi Medical Hall", "DUPHALAC ENEMA 300ML", -1.0, 0.0, -285.34)]
+    assert r["omitted"] == 1
